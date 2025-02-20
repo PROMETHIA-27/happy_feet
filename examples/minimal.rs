@@ -3,7 +3,7 @@ use std::{hash::Hash, ops::Range};
 use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, math::primitives, prelude::*};
 use rand::{prelude::*, rng};
-use slither::{CollideAndSlideConfig, SkinWidth, collide_and_slide, collide_and_slide2};
+use slither::{CharacterValue, CollideAndSlideConfig, collide_and_slide, collide_and_slide2};
 
 fn main() -> AppExit {
     App::new()
@@ -188,11 +188,13 @@ fn update(
             velocity.0 += (transform.rotation * input)
                 .reject_from(Vec3::Y)
                 .normalize_or_zero()
-                * 10.0
+                * 100.0
                 * time.delta_secs();
             velocity.0 += Vec3::NEG_Y * time.delta_secs() * 10.0;
         } else {
-            velocity.0 = transform.rotation * input * 10.0;
+            let vel = &mut velocity.0;
+            *vel += transform.rotation * input * 400.0 * time.delta_secs();
+            *vel -= *vel * 20.0 * time.delta_secs();
         }
 
         if *noclip_enabled {
@@ -206,18 +208,22 @@ fn update(
             transform.rotation,
             velocity.0 * time.delta_secs(),
             &CollideAndSlideConfig {
-                skin_width: SkinWidth::Relative(0.1),
+                // skin_width: CharacterValue::Relative(0.1),
+                skin_width: CharacterValue::Relative(0.01),
+                floor_snap_distance: CharacterValue::Relative(1.0),
+                max_slope_angle: 45_f32.to_radians(),
                 apply_remaining_motion: true,
                 ..Default::default()
             },
             shape,
             &filter,
             &spatial,
-            |hit| {
-                velocity.0 = velocity.0.reject_from(hit.normal1);
+            |normal| {
+                velocity.0 = velocity.0.reject_from(normal);
             },
             &mut gizmos,
         );
+
         // velocity.0 = Vec3::ZERO;
         transform.translation = position;
         // transform.translation += out.motion + out.remaining;

@@ -1,6 +1,10 @@
 use std::mem;
 
-use avian3d::{math::PI, parry::shape::TypedShape, prelude::*};
+use avian3d::{
+    math::PI,
+    parry::{self, shape::TypedShape},
+    prelude::*,
+};
 use bevy::{
     color::palettes::css::{BLACK, BLUE, GREEN, LIGHT_BLUE, RED, WHITE},
     math::VectorSpace,
@@ -65,16 +69,18 @@ impl CollideAndSlideCollision {
     }
 }
 
-pub enum SkinWidth {
+pub enum CharacterValue {
     Absolute(f32),
     Relative(f32),
 }
 
-impl SkinWidth {
-    fn scaled(&self, shape: &Collider) -> f32 {
+impl CharacterValue {
+    pub const ZERO: Self = Self::Absolute(0.0);
+
+    pub fn eval(&self, shape: &Collider) -> f32 {
         match self {
-            SkinWidth::Absolute(value) => *value,
-            SkinWidth::Relative(value) => {
+            CharacterValue::Absolute(value) => *value,
+            CharacterValue::Relative(value) => {
                 let extents: Vec3 = shape.shape().compute_local_aabb().extents().into();
                 value * extents.max_element()
             }
@@ -85,8 +91,9 @@ impl SkinWidth {
 pub struct CollideAndSlideConfig {
     pub up: Dir3,
     pub max_slope_angle: f32,
-    pub skin_width: SkinWidth,
-    pub normal_nudge: f32, // TODO: implement
+    pub skin_width: CharacterValue,
+    pub floor_snap_distance: CharacterValue,
+    pub normal_nudge: f32, // TODO: don't think this is needed.
     pub max_slide_count: u32,
     /// Applies the remaining motion to the motion vector when no collision was made.
     /// This should be `false` when using [`LinearVelocity`] to avoid moving at double speed.
@@ -98,7 +105,8 @@ impl Default for CollideAndSlideConfig {
         Self {
             up: Dir3::Y,
             max_slope_angle: PI / 2.0,
-            skin_width: SkinWidth::Relative(0.01),
+            skin_width: CharacterValue::Relative(0.01),
+            floor_snap_distance: CharacterValue::Relative(0.1),
             normal_nudge: 1e-4,
             max_slide_count: 5,
             apply_remaining_motion: false,
@@ -120,28 +128,41 @@ pub fn collide_and_slide2(
     shape: &Collider,
     filter: &SpatialQueryFilter,
     spatial: &SpatialQuery,
-    mut on_hit: impl FnMut(&ShapeHitData),
+    mut on_hit: impl FnMut(Vec3),
     gizmos: &mut Gizmos,
 ) -> Vec3 {
     // TODO:
-    // - [ ] solve all overlaps in one go
-    // - [ ] Snap to floor
-    // - [ ] stair stepping (steal from rapier)
-    // - [ ] slope handling (steal from rapier)
+    // - [x] (ish) solve all overlaps in one go
+    // - [x] Snap to floor
+    // - [x] (ish) stair stepping
+    // - [ ] slope handling
+    // - [ ] floor velocity
+    // - [ ] only snap to floor when we touched the floor previously and no longer do,
+    // - [ ] snap to floor should run after slide
+    // - [ ] also return new velocity
+    // - [ ] stepping configuration, min width, max height, exclude dynamic bodies..
+    // - [ ] detect grounded at starting pos.
 
-    let skin_width = config.skin_width.scaled(shape);
+    let skin_width = config.skin_width.eval(shape);
+    let inflated_shape = inflate_shape(shape, skin_width);
 
     let mut position = origin;
     let mut remaining_motion = target_motion;
 
-    enum CollisionPlane {
+    let mut is_on_floor = false;
+    let mut is_on_wall = false;
+    let mut is_on_roof = false;
+
+    enum CollisionIndex {
         First,
-        Second { first_plane: Vec3 },
+        Second { first_normal: Vec3 },
         Third,
     }
 
-    let mut collision_plane = CollisionPlane::First;
+    let mut collision_index = CollisionIndex::First;
 
+    // Perform move and slide,
+    // this should generally run a maximum of 3 times regardless of max slide count.
     for _ in 0..config.max_slide_count {
         let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
             break;
@@ -162,113 +183,281 @@ pub fn collide_and_slide2(
             },
             filter,
         ) else {
-            position += mem::take(&mut remaining_motion);
+            if config.apply_remaining_motion {
+                position += mem::take(&mut remaining_motion);
+            }
             break;
         };
 
-        on_hit(&hit);
-
         gizmos.arrow(hit.point1, hit.point1 + hit.normal1 * 4.0, RED);
 
-        let incoming = direction * (hit.distance - skin_width); // Move away from surface
+        let incoming = direction * (hit.distance - skin_width); // Move a little bit away from surface
         // let incoming = direction * f32::max(0.0, hit.distance - skin_width);
 
         position += incoming;
-        remaining_motion -= incoming + hit.normal1 * config.normal_nudge; // Rapier uses normal nudge, idk why
+        remaining_motion -= incoming;
 
-        match collision_plane {
-            // One plane.
-            CollisionPlane::First => {
+        on_hit(hit.normal1);
+
+        let slope = Slope::new(config.up, Dir3::new_unchecked(hit.normal1));
+
+        gizmos.sphere(Isometry3d::from_translation(hit.point1), 2.0, BLACK);
+
+        match slope.plane(config.max_slope_angle) {
+            SlopePlane::Floor => is_on_floor = true,
+            SlopePlane::Wall => is_on_wall = true,
+            SlopePlane::Roof => is_on_roof = true,
+        }
+
+        // if matches!(
+        //     slope.plane(config.max_slope_angle),
+        //     SlopePlane::Wall | SlopePlane::Roof
+        // ) {
+        //     if handle_stairs(
+        //         shape,
+        //         &mut position,
+        //         &mut remaining_motion,
+        //         rotation,
+        //         5.0,
+        //         1.0,
+        //         config.max_slope_angle,
+        //         skin_width,
+        //         config.up,
+        //         filter,
+        //         spatial,
+        //         gizmos,
+        //     ) {
+        //         collision_index = CollisionIndex::First;
+        //         continue;
+        //     }
+        // }
+
+        match collision_index {
+            // One collision, project on plane.
+            CollisionIndex::First => {
                 remaining_motion = remaining_motion.reject_from(hit.normal1);
 
-                collision_plane = CollisionPlane::Second {
-                    first_plane: hit.normal1,
+                collision_index = CollisionIndex::Second {
+                    first_normal: hit.normal1,
                 };
             }
-            // Two planes, project on crease normal.
-            CollisionPlane::Second { first_plane } => {
-                let crease = Dir3::new(first_plane.cross(hit.normal1)).unwrap();
+            // Two collisions, project on crease normal.
+            CollisionIndex::Second { first_normal } => {
+                let Ok(crease) = Dir3::new(first_normal.cross(hit.normal1)) else {
+                    remaining_motion = remaining_motion.reject_from(hit.normal1);
+                    continue;
+                };
 
                 remaining_motion = remaining_motion.project_onto(*crease);
 
                 gizmos.arrow(hit.point1, hit.point1 + crease * 4.0, LIGHT_BLUE);
 
-                collision_plane = CollisionPlane::Third;
+                collision_index = CollisionIndex::Third;
             }
-            // Three planes, no motion is possible.
-            CollisionPlane::Third => remaining_motion = Vec3::ZERO,
+            // Three collisions, no motion is possible.
+            CollisionIndex::Third => {
+                remaining_motion = Vec3::ZERO; // This is not used but maybe it will be, idk.
+                break;
+            }
         }
     }
 
-    let mut hits = Vec::with_capacity(8);
+    // Attempt to solve all overlaps.
+    let mut overlaps = Vec::with_capacity(8);
+    for _ in 0..16 {
+        overlaps.clear();
+        if let Some(motion) = solve_overlaps(
+            &inflated_shape,
+            position,
+            rotation,
+            config.up,
+            &mut overlaps,
+            filter,
+            spatial,
+            |normal| {
+                let slope = Slope::new(config.up, Dir3::new_unchecked(normal));
+                if slope.is_floor(config.max_slope_angle) {
+                    is_on_floor = true;
+                }
 
-    // Solve overlaps.
-    // 16 iterations are worst case scenario, 1 is usually enough.
-    for i in 0..16 {
-        hits.clear();
-        spatial.shape_hits_callback(
-            &inflate_shape(shape, skin_width),
+                on_hit(normal);
+            },
+        ) {
+            position += motion;
+        }
+    }
+
+    let floor_snap_distance = config.floor_snap_distance.eval(shape);
+
+    // Snap to floor.
+    if false && !is_on_floor && floor_snap_distance > 0.0 {
+        if let Some(hit) = spatial.cast_shape(
+            &inflated_shape,
             position,
             rotation,
             -config.up,
             &ShapeCastConfig {
-                max_distance: 0.0,    // Use this for snaping to floor.
-                target_distance: 0.0, // I don't know what this does, I copied it from rapier.
+                max_distance: floor_snap_distance,
+                target_distance: 0.0,
                 compute_contact_on_penetration: true,
-                ignore_origin_penetration: false,
+                ignore_origin_penetration: true,
             },
-            &filter,
-            |mut hit| {
-                let start = rotation * hit.point2 + position;
-                let dist_sq = start.distance_squared(hit.point1);
-                if dist_sq > 1e-4 {
-                    hit.distance = dist_sq.sqrt();
-                    hits.push(hit);
-                }
-
-                hits.capacity() > hits.len()
-            },
-        );
-
-        if hits.is_empty() {
-            if i > 0 {
-                println!("solved collisions in {} iterations", i);
-            }
-            break;
-        }
-
-        // Largest overlap goes first. Is this neccessary?
-        hits.sort_by(|a, b| b.distance.total_cmp(&a.distance));
-
-        // let total = hits
-        //     .iter()
-        //     .fold(Vec3::ZERO, |acc, hit| acc + hit.normal1 * hit.distance);
-        // position += total / hits.len() as f32;
-
-        // let hit = &hits[0];
-        // position += hit.distance * hit.normal1;
-
-        // Iteratively solve each hit.
-        for i in 0..hits.len() {
-            let hit = hits[i];
-
-            if hit.distance < 1e-4 {
-                continue;
-            }
-
-            on_hit(&hit);
-
-            position += hit.distance * hit.normal1;
-
-            // Make sure the next hits doesn't uneccessarily move the character.
-            for next_hit in &mut hits[i + 1..] {
-                let accounted_for = f32::max(0.0, hit.normal1.dot(next_hit.normal1) * hit.distance);
-                next_hit.distance = f32::max(0.0, next_hit.distance - accounted_for);
-            }
+            filter,
+        ) {
+            let incoming = -config.up * hit.distance;
+            position += incoming;
         }
     }
 
     position
+}
+
+fn handle_stairs(
+    shape: &Collider,
+    position: &mut Vec3,
+    remaining_motion: &mut Vec3,
+    rotation: Quat,
+    max_step_height: f32,
+    min_step_width: f32,
+    max_slope_angle: f32,
+    skin_width: f32,
+    up: Dir3,
+    filter: &SpatialQueryFilter,
+    spatial: &SpatialQuery,
+    gizmos: &mut Gizmos,
+) -> bool {
+    let horizontal_motion = remaining_motion.reject_from(*up);
+    let horizontal_len = horizontal_motion.length();
+    let Some(horizontal_dir) = horizontal_motion.try_normalize() else {
+        return false;
+    };
+
+    let start = *position + up * max_step_height + horizontal_dir * (min_step_width + skin_width);
+
+    gizmos.sphere(Isometry3d::from_translation(start), 1.0, WHITE);
+
+    if let Some(hit) = spatial.cast_shape(
+        shape,
+        start,
+        rotation,
+        -up,
+        &ShapeCastConfig {
+            max_distance: max_step_height + skin_width,
+            target_distance: skin_width,
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: true,
+        },
+        filter,
+    ) {
+        let new_position = start - up * (hit.distance - skin_width);
+
+        gizmos.sphere(Isometry3d::from_translation(new_position), 1.0, BLACK);
+
+        let normal = spatial
+            .cast_ray(hit.point1 + up * 0.1, -up, 1.0, true, filter)
+            .map(|ray_hit| ray_hit.normal)
+            .unwrap_or(hit.normal1);
+
+        let slope = Slope::new(up, Dir3::new_unchecked(normal));
+
+        match slope.plane(max_slope_angle) {
+            SlopePlane::Floor => {
+                gizmos.arrow(hit.point1, hit.point1 + normal * 2.0, GREEN);
+                gizmos.sphere(Isometry3d::from_translation(hit.point1), 1.0, GREEN);
+
+                *position = new_position;
+                *remaining_motion -= horizontal_dir * f32::min(horizontal_len, min_step_width);
+
+                // *remaining_motion -= horizontal_dir * (min_step_width + skin_width);
+
+                return true;
+            }
+            SlopePlane::Wall | SlopePlane::Roof => {
+                gizmos.arrow(hit.point1, hit.point1 + normal * 2.0, RED);
+                gizmos.sphere(Isometry3d::from_translation(hit.point1), 1.0, RED);
+                return false;
+            }
+        }
+    }
+
+    false
+}
+
+/// All the info required to solve an overlap with the world.
+#[derive(Debug, Clone, Copy)]
+struct OverlapInfo {
+    normal: Vec3,
+    depth: f32,
+}
+
+fn solve_overlaps(
+    inflated_shape: &Collider,
+    position: Vec3,
+    rotation: Quat,
+    up: Dir3,
+    overlaps: &mut Vec<OverlapInfo>,
+    filter: &SpatialQueryFilter,
+    spatial: &SpatialQuery,
+    mut on_hit: impl FnMut(Vec3),
+) -> Option<Vec3> {
+    spatial.shape_hits_callback(
+        &inflated_shape,
+        position,
+        rotation,
+        -up,
+        &ShapeCastConfig {
+            max_distance: 0.0, // Use this for snaping to floor.
+            target_distance: 0.0,
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: false,
+        },
+        filter,
+        |hit| {
+            let start = rotation * hit.point2 + position;
+            let depth_sq = start.distance_squared(hit.point1);
+            if depth_sq > 1e-6 {
+                overlaps.push(OverlapInfo {
+                    normal: hit.normal1,
+                    depth: depth_sq.sqrt(),
+                });
+            }
+
+            overlaps.capacity() > overlaps.len()
+        },
+    );
+
+    if overlaps.is_empty() {
+        return None;
+    }
+
+    // Larger overlaps are more important, so they go first.
+    overlaps.sort_by(|a, b| b.depth.total_cmp(&a.depth));
+
+    let mut motion = Vec3::ZERO;
+
+    // Solve each overlap.
+    for i in 0..overlaps.len() {
+        let overlap = overlaps[i];
+
+        if overlap.depth < 1e-4 {
+            continue;
+        }
+
+        on_hit(overlap.normal);
+
+        motion += overlap.depth * overlap.normal;
+
+        // Make sure the next overlaps doesn't move the character further than neccessary.
+        for next_hit in &mut overlaps[i + 1..] {
+            if next_hit.depth < 1e-4 {
+                continue;
+            }
+            let accounted_for = f32::max(0.0, overlap.normal.dot(next_hit.normal) * overlap.depth);
+            next_hit.depth = f32::max(0.0, next_hit.depth - accounted_for);
+        }
+    }
+
+    Some(motion)
 }
 
 #[must_use]
@@ -283,7 +472,7 @@ pub fn collide_and_slide(
     mut on_hit: impl FnMut(&CollideAndSlideCollision),
     gizmos: &mut Gizmos, // TODO: remove this
 ) -> CollideAndSlideOutput {
-    let skin_width = config.skin_width.scaled(shape);
+    let skin_width = config.skin_width.eval(shape);
 
     let mut total_motion = Vec3::ZERO;
     let mut remaining_motion = target_motion;
