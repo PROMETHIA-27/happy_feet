@@ -124,6 +124,8 @@ pub fn collide_and_slide2(
     gizmos: &mut Gizmos,
 ) -> Vec3 {
     // TODO:
+    // - [ ] solve all overlaps in one go
+    // - [ ] Snap to floor
     // - [ ] stair stepping (steal from rapier)
     // - [ ] slope handling (steal from rapier)
 
@@ -172,11 +174,11 @@ pub fn collide_and_slide2(
         // let incoming = direction * f32::max(0.0, hit.distance - skin_width);
 
         position += incoming;
+        remaining_motion -= incoming + hit.normal1 * config.normal_nudge; // Rapier uses normal nudge, idk why
 
         match collision_plane {
             // One plane.
             CollisionPlane::First => {
-                remaining_motion -= incoming;
                 remaining_motion = remaining_motion.reject_from(hit.normal1);
 
                 collision_plane = CollisionPlane::Second {
@@ -187,7 +189,6 @@ pub fn collide_and_slide2(
             CollisionPlane::Second { first_plane } => {
                 let crease = Dir3::new(first_plane.cross(hit.normal1)).unwrap();
 
-                remaining_motion -= incoming;
                 remaining_motion = remaining_motion.project_onto(*crease);
 
                 gizmos.arrow(hit.point1, hit.point1 + crease * 4.0, LIGHT_BLUE);
@@ -199,47 +200,71 @@ pub fn collide_and_slide2(
         }
     }
 
+    let mut hits = Vec::with_capacity(8);
+
     // Solve overlaps.
-    for _ in 0..32 {
-        let mut hits = spatial.shape_hits(
+    // 16 iterations are worst case scenario, 1 is usually enough.
+    for i in 0..16 {
+        hits.clear();
+        spatial.shape_hits_callback(
             &inflate_shape(shape, skin_width),
             position,
             rotation,
-            Dir3::NEG_Y,
-            64,
+            -config.up,
             &ShapeCastConfig {
-                max_distance: 0.0,
+                max_distance: 0.0,    // Use this for snaping to floor.
                 target_distance: 0.0, // I don't know what this does, I copied it from rapier.
                 compute_contact_on_penetration: true,
                 ignore_origin_penetration: false,
             },
-            filter,
+            &filter,
+            |mut hit| {
+                let start = rotation * hit.point2 + position;
+                let dist_sq = start.distance_squared(hit.point1);
+                if dist_sq > 1e-4 {
+                    hit.distance = dist_sq.sqrt();
+                    hits.push(hit);
+                }
+
+                hits.capacity() > hits.len()
+            },
         );
 
-        // Remove small overlaps and store the overlap distance.
-        hits.retain_mut(|hit| {
-            if hit.distance > 0.0 {
-                return false;
+        if hits.is_empty() {
+            if i > 0 {
+                println!("solved collisions in {} iterations", i);
             }
-            let start = rotation * hit.point2 + position;
-            let dist_sq = start.distance_squared(hit.point1);
-            if dist_sq < 1e-4 {
-                false
-            } else {
-                hit.distance = dist_sq.sqrt();
-                true
+            break;
+        }
+
+        // Largest overlap goes first. Is this neccessary?
+        hits.sort_by(|a, b| b.distance.total_cmp(&a.distance));
+
+        // let total = hits
+        //     .iter()
+        //     .fold(Vec3::ZERO, |acc, hit| acc + hit.normal1 * hit.distance);
+        // position += total / hits.len() as f32;
+
+        // let hit = &hits[0];
+        // position += hit.distance * hit.normal1;
+
+        // Iteratively solve each hit.
+        for i in 0..hits.len() {
+            let hit = hits[i];
+
+            if hit.distance < 1e-4 {
+                continue;
             }
-        });
 
-        // Largest overlap goes first.
-        hits.sort_by(|a, b| b.distance.total_cmp(&a.distance)); // TODO: the order is not used for anything
+            on_hit(&hit);
 
-        // This might not work, idk.
-        if hits.len() > 0 {
-            let folded = hits
-                .iter()
-                .fold(Vec3::ZERO, |acc, hit| acc + hit.normal1 * hit.distance);
-            position += folded / hits.len() as f32;
+            position += hit.distance * hit.normal1;
+
+            // Make sure the next hits doesn't uneccessarily move the character.
+            for next_hit in &mut hits[i + 1..] {
+                let accounted_for = f32::max(0.0, hit.normal1.dot(next_hit.normal1) * hit.distance);
+                next_hit.distance = f32::max(0.0, next_hit.distance - accounted_for);
+            }
         }
     }
 
