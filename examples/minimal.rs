@@ -3,7 +3,10 @@ use std::{hash::Hash, ops::Range};
 use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, math::primitives, prelude::*};
 use rand::{prelude::*, rng};
-use slither::{CharacterValue, CollideAndSlideConfig, collide_and_slide, collide_and_slide2};
+use slither::{
+    CharacterValue, CollideAndSlideConfig, collide_and_slide, collide_and_slide2,
+    collide_and_slide3,
+};
 
 fn main() -> AppExit {
     App::new()
@@ -44,6 +47,7 @@ fn setup_player(
             MeshMaterial3d(materials.add(StandardMaterial::default())),
         ))
         .with_children(|player| {
+            player.spawn((Collider::capsule(1.0 + 1.0, 2.0), CollisionLayers::NONE));
             player
                 .spawn((CameraArm, Transform {
                     translation: Vec3::Y * 2.0,
@@ -97,18 +101,19 @@ fn setup_level(
     let material = materials.add(StandardMaterial::default());
 
     let origin = Vec3::new(-50.0, 0.0, 0.0);
-    for _ in 0..10 {
+    for _ in 0..20 {
         let offset = Vec3::new(
             rng.random_range(-20.0..20.0),
-            0.0,
+            rng.random_range(0.0..10.0),
             rng.random_range(-20.0..20.0),
         );
 
-        let size = rng.random_range(0.1..10.0);
+        let size = rng.random_range(1.0..10.0);
+        let height = rng.random_range(1.0..2.0);
         commands.spawn((
             Transform {
                 translation: origin + offset,
-                scale: Vec3::splat(size),
+                scale: Vec3::new(size, height, size),
                 ..Default::default()
             },
             RigidBody::Static,
@@ -226,33 +231,53 @@ fn update(
         }
 
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
-        let position = collide_and_slide2(
+        let out = collide_and_slide3(
             transform.translation,
             transform.rotation,
-            velocity.0 * time.delta_secs(),
-            &CollideAndSlideConfig {
-                skin_width: CharacterValue::Relative(0.1),
-                // skin_width: CharacterValue::Relative(0.01),
-                floor_snap_distance: CharacterValue::Relative(1.0),
-                max_slope_angle: 45_f32.to_radians(),
-                apply_remaining_motion: true,
-                ..Default::default()
-            },
+            velocity.0,
+            Dir3::Y,
+            1.0,
+            60_f32.to_radians(),
+            4.0,
+            0.25,
+            10.0,
             shape,
             &filter,
             &spatial,
-            |normal| {
-                let length = velocity.0.length();
-                velocity.0 = velocity.0.normalize_or_zero().reject_from(normal) * length;
-            },
+            time.delta_secs(),
             &mut gizmos,
         );
+        let delta = transform.translation - out.position;
+        transform.translation = out.position;
+        velocity.0 = out.velocity;
 
-        dbg!(velocity.0.reject_from(Vec3::Y).length());
+        // dbg!(delta.reject_from(Vec3::Y).length());
 
-        // velocity.0 = Vec3::ZERO;
-        transform.translation = position;
-        // transform.translation += out.motion + out.remaining;
+        // let position = collide_and_slide2(
+        //     transform.translation,
+        //     transform.rotation,
+        //     velocity.0 * time.delta_secs(),
+        //     &CollideAndSlideConfig {
+        //         skin_width: CharacterValue::Relative(0.2),
+        //         // skin_width: CharacterValue::Relative(0.01),
+        //         // floor_snap_distance: CharacterValue::Relative(1.0),
+        //         floor_snap_distance: CharacterValue::ZERO,
+        //         max_step_height: CharacterValue::ZERO,
+        //         max_slope_angle: 60_f32.to_radians(),
+        //         apply_remaining_motion: true,
+        //         ..Default::default()
+        //     },
+        //     shape,
+        //     &filter,
+        //     &spatial,
+        //     |normal| {
+        //         // velocity.0 =
+        //         //     velocity.0.reject_from(normal).normalize_or_zero() * velocity.0.length();
+        //         velocity.0 = velocity.0.reject_from(normal);
+        //     },
+        //     &mut gizmos,
+        // );
+        // transform.translation = position;
     }
 }
 

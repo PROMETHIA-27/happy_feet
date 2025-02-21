@@ -7,9 +7,10 @@ use avian3d::{
 };
 use bevy::{
     color::palettes::css::{BLACK, BLUE, GREEN, LIGHT_BLUE, RED, WHITE},
-    math::VectorSpace,
+    math::{InvalidDirectionError, VectorSpace},
     prelude::*,
 };
+use smallvec::{Array, SmallVec};
 
 pub const HALF_PI: f32 = 1.618033988749894848204586834365638118_f32;
 
@@ -18,6 +19,25 @@ enum SlopePlane {
     Floor,
     Wall,
     Roof,
+}
+
+impl SlopePlane {
+    fn new(up_direction: Dir3, normal: Dir3, max_floor_angle: f32) -> Self {
+        let angle = f32::acos(normal.dot(*up_direction));
+        match angle {
+            a if a > HALF_PI => Self::Roof,
+            a if a > max_floor_angle => Self::Wall,
+            _ => Self::Floor,
+        }
+    }
+
+    fn is_floor(&self) -> bool {
+        match self {
+            SlopePlane::Floor => true,
+            SlopePlane::Wall => false,
+            SlopePlane::Roof => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -123,10 +143,12 @@ pub struct CollideAndSlideOutput {
     pub remaining: Vec3,
 }
 
-struct MovementOutput {
-    position: Vec3,
-    velocity: Vec3,
-    remaining: Vec3,
+pub struct MovementOutput {
+    pub position: Vec3,
+    pub velocity: Vec3,
+    pub remaining: Vec3,
+    pub slide_distance: f32,
+    pub travel_distance: f32,
 }
 
 pub fn collide_and_slide3(
@@ -135,14 +157,15 @@ pub fn collide_and_slide3(
     mut velocity: Vec3,
     up_direction: Dir3,
     skin_width: f32,
-    max_slope_angle: f32,
+    max_floor_angle: f32,
     max_step_height: f32,
     min_step_depth: f32,
-    step_down_height: f32,
+    floor_snap_length: f32,
     shape: &Collider,
     filter: &SpatialQueryFilter,
     spatial: &SpatialQuery,
     delta_time: f32,
+    gizmos: &mut Gizmos,
 ) -> MovementOutput {
     let mut remaining_motion = velocity * delta_time;
 
@@ -150,15 +173,72 @@ pub fn collide_and_slide3(
     let mut is_on_wall = false;
     let mut is_on_roof = false;
 
-    enum CollisionIndex {
+    // 0. Detect grounded and snap out of floor.
+
+    enum SlopeIndex {
         First,
         Second { first_normal: Vec3 },
         Third,
     }
 
-    let mut collision_index = CollisionIndex::First;
+    let mut slope_index = SlopeIndex::First;
 
     for _ in 0..16 {
+        // 1. Attempt to step over things.
+        let (horizontal_dir, horizontal_len) =
+            Dir3::new_and_length(remaining_motion.reject_from(*up_direction))
+                // Dir3::new_and_length(remaining_motion)
+                .map(|(d, l)| (*d, l))
+                .unwrap_or_default();
+
+        let aabb = shape.aabb(position, rotation);
+        let size = aabb.size();
+        let half_height = up_direction.dot(size) / 2.0 + skin_width;
+
+        // if let Ok(horizontal_dir) = Dir3::new(remaining_motion.reject_from(*up_direction))
+        {
+            let step_up = up_direction * half_height;
+            let step_forward = horizontal_dir * horizontal_len;
+
+            // Sweep down from the target step location.
+            if let Some(hit) = spatial.cast_shape(
+                &inflate_shape(shape, skin_width),
+                position + step_up + step_forward,
+                rotation,
+                -up_direction,
+                &ShapeCastConfig {
+                    max_distance: half_height,
+                    target_distance: skin_width,
+                    compute_contact_on_penetration: true,
+                    ignore_origin_penetration: true,
+                },
+                filter,
+            ) {
+                {
+                    let start = rotation * hit.point2 + position;
+
+                    gizmos.sphere(Isometry3d::from_translation(start), 1., WHITE);
+
+                    let slope = SlopePlane::new(
+                        up_direction,
+                        Dir3::new_unchecked(hit.normal1),
+                        max_floor_angle,
+                    );
+
+                    if slope.is_floor() {
+                        // FIXME: this may make it possible to step through walls.
+                        let incoming = -up_direction * hit.distance;
+                        position += step_up + step_forward + incoming;
+                        remaining_motion -= step_forward;
+
+                        gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., BLACK);
+                    } else {
+                        gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., RED);
+                    }
+                };
+            }
+        }
+
         let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
             break;
         };
@@ -188,27 +268,294 @@ pub fn collide_and_slide3(
         position += incoming;
         remaining_motion -= incoming;
 
-        let slope = Slope::new(up_direction, Dir3::new_unchecked(hit.normal1));
+        let slope = SlopePlane::new(
+            up_direction,
+            Dir3::new_unchecked(hit.normal1),
+            max_floor_angle,
+        );
 
-        match slope.plane(max_slope_angle) {
+        match slope {
             SlopePlane::Floor => is_on_floor = true,
             SlopePlane::Wall => is_on_wall = true,
             SlopePlane::Roof => is_on_roof = true,
         }
 
-        // 1. Attempt step on wall/roof.
+        // 1. Attempt to step over walls.
+        let mut did_step = false;
+        if max_step_height > 0.0 && matches!(slope, SlopePlane::Wall | SlopePlane::Roof) {
+            // if max_step_height > 0.0 || slope.is_floor() {
+            if let Ok(horizontal_dir) = Dir3::new(remaining_motion.reject_from(*up_direction)) {
+                let horizontal_len = horizontal_dir.dot(remaining_motion);
+
+                let step_up = up_direction * max_step_height;
+
+                let step_forward_dist = min_step_depth + skin_width;
+                let step_forward = horizontal_dir * step_forward_dist;
+                // let step_forward = horizontal_dir
+                //     * (f32::min(min_step_depth, horizontal_dir.dot(remaining_motion)) + skin_width);
+
+                // Sweep down from the target step location.
+                if let Some(hit) = spatial.cast_shape(
+                    shape,
+                    position + step_up + step_forward,
+                    rotation,
+                    -up_direction,
+                    &ShapeCastConfig {
+                        max_distance: max_step_height + skin_width,
+                        target_distance: skin_width,
+                        compute_contact_on_penetration: true,
+                        ignore_origin_penetration: true,
+                    },
+                    filter,
+                ) {
+                    // Only step if the normal is walkable.
+                    if let SlopePlane::Floor = SlopePlane::new(
+                        up_direction,
+                        Dir3::new_unchecked(hit.normal1),
+                        max_floor_angle,
+                    ) {
+                        let incoming = -up_direction * (hit.distance - skin_width);
+                        // position += step_up + step_forward + incoming;
+                        let new_position = position + step_up + step_forward + incoming;
+
+                        // Place body on the ground after stepping.
+                        // position = new_position;
+                        // continue;
+                        if let Some(hit) = spatial.cast_shape(
+                            &inflate_shape(shape, skin_width),
+                            new_position + up_direction * 1e-4,
+                            rotation,
+                            -up_direction,
+                            &ShapeCastConfig {
+                                max_distance: 10.0,
+                                target_distance: skin_width,
+                                compute_contact_on_penetration: true,
+                                ignore_origin_penetration: true,
+                            },
+                            filter,
+                        ) {
+                            let incoming = -up_direction * hit.distance;
+                            position = new_position + incoming;
+
+                            // remaining_motion -= step_forward; // FIXME: this may result in new motion being in the opposite direction.
+                            remaining_motion -=
+                                horizontal_dir * f32::min(step_forward_dist, horizontal_len);
+
+                            // dbg!(remaining_motion);
+                            did_step = true;
+                            // break;
+                        }
+
+                        // Since we have stepped over the wall, the previous slope is now invalid.
+                        // FIXME: maybe not?
+                        // slope_index = SlopeIndex::First;
+                    };
+                }
+            }
+        }
+
+        continue;
+
+        // 1.5. Attempt step up slope.
+        // if slope.is_floor() {
+        // {
+        // if let Ok(horizontal_dir) = Dir3::new(remaining_motion.reject_from(*up_direction)) {
+        //     let step_up = up_direction * max_step_height;
+        //     // let step_forward = horizontal_dir * (min_step_depth + skin_width);
+        //     // let step_forward = horizontal_dir
+        //     //     * (f32::min(min_step_depth, horizontal_dir.dot(remaining_motion)) + skin_width);
+        //     let step_forward =
+        //     //     horizontal_dir * (horizontal_dir.dot(remaining_motion) + skin_width);
+        //     horizontal_dir * horizontal_dir.dot(remaining_motion);
+
+        //     // Sweep down from the target step location.
+        //     if let Some(hit) = spatial.cast_shape(
+        //         shape,
+        //         position + step_up + step_forward,
+        //         rotation,
+        //         -up_direction,
+        //         &ShapeCastConfig {
+        //             max_distance: max_step_height,
+        //             target_distance: 0.0,
+        //             compute_contact_on_penetration: true,
+        //             ignore_origin_penetration: true,
+        //         },
+        //         filter,
+        //     ) {
+        //         {
+        //             dbg!(hit.distance);
+        //             // let incoming = -up_direction * (hit.distance - skin_width);
+        //             let incoming = -up_direction * hit.distance;
+        //             position += step_up + step_forward + incoming;
+        //             remaining_motion -= step_forward; // FIXME: this may result in new motion being in the opposite direction.
+
+        //             // Since we have stepped over the wall, the previous slope is now invalid.
+        //             // FIXME: maybe not?
+        //             slope_index = SlopeIndex::First;
+
+        //             did_step = true;
+        //         };
+        //     }
+        // }
+        // }
 
         // 2. If not step, then slide.
-        // 2.1. Slide on floor.
-        // 2.2. Slide on wall/roof.
+        if !did_step {
+            match slope_index {
+                // When first colliding with the floor or a wall, we want to remove all motion
+                // in the direction of the hit normal, i.e., project the motion on the normal plane.
+                SlopeIndex::First => {
+                    match slope {
+                        // When moving on the floor, we want the speed to be the same regardless of angle.
+                        // FIXME: this is probably wrong.
+                        SlopePlane::Floor => {
+                            // remaining_motion = remaining_motion.reject_from(hit.normal1);
+                            remaining_motion
+                                .reject_from(hit.normal1)
+                                .try_normalize()
+                                .map(|dir| {
+                                    remaining_motion = dir * remaining_motion.length();
+                                });
+                            // velocity
+                            //     .reject_from(hit.normal1)
+                            //     .try_normalize()
+                            //     .map(|dir| {
+                            //         velocity = dir * velocity.length();
+                            //     });
+                        }
+                        SlopePlane::Wall | SlopePlane::Roof => {
+                            remaining_motion = remaining_motion.reject_from(hit.normal1);
+                            // velocity = velocity.reject_from(hit.normal1);
+                        }
+                    }
+                    slope_index = SlopeIndex::Second {
+                        first_normal: hit.normal1,
+                    };
+                }
+                // Since the previous iteration changed the motion direction, doing so again might
+                // result in a new motion where no parts of it existed in the original desired motion.
+                // This will result in the character "shaking" when walking into a corner.
+                //
+                // We solve this by projecting onto the "crease" normal of this and the previous hit instead.
+                SlopeIndex::Second { first_normal }
+                    if first_normal.dot(hit.normal1) < 1.0 - 1e-4 =>
+                {
+                    let crease = first_normal.cross(hit.normal1).normalize();
+                    match slope {
+                        SlopePlane::Floor => {
+                            remaining_motion
+                                .project_onto(crease)
+                                .try_normalize()
+                                .map(|dir| {
+                                    remaining_motion = dir * remaining_motion.length();
+                                });
+                            velocity.project_onto(crease).try_normalize().map(|dir| {
+                                // velocity = dir * velocity.length();
+                            });
+                        }
+                        SlopePlane::Wall | SlopePlane::Roof => {
+                            remaining_motion = remaining_motion.project_onto(crease);
+                            // velocity = velocity.project_onto(crease);
+                        }
+                    }
+                    slope_index = SlopeIndex::Third;
+                }
+                // When the character is sliding on three unique normals, all remaining motion is cancelled out.
+                _ => {
+                    remaining_motion = Vec3::ZERO;
+                    velocity = Vec3::ZERO;
+                }
+            }
+        }
 
         // 3. Snap to floor.
+        // if floor_snap_length > 0.0 {
+        //     if let Some(hit) = spatial.cast_shape(
+        //         shape,
+        //         position,
+        //         rotation,
+        //         -up_direction,
+        //         &ShapeCastConfig {
+        //             max_distance: dbg!(floor_snap_length) + skin_width,
+        //             target_distance: skin_width,
+        //             compute_contact_on_penetration: true,
+        //             ignore_origin_penetration: true,
+        //         },
+        //         filter,
+        //     ) {
+        //         let incoming = -up_direction * (hit.distance - skin_width);
+        //         position += incoming;
+        //     }
+        // }
     }
+
+    // 3. Snap to floor.
+    // if let Some(hit) = spatial.cast_shape(
+    //     shape,
+    //     position,
+    //     rotation,
+    //     -up_direction,
+    //     &ShapeCastConfig {
+    //         max_distance: dbg!(floor_snap_length) + skin_width,
+    //         target_distance: skin_width,
+    //         compute_contact_on_penetration: true,
+    //         ignore_origin_penetration: true,
+    //     },
+    //     filter,
+    // ) {
+    //     let incoming = -up_direction * (hit.distance - skin_width);
+    //     position += incoming;
+    // }
+
+    // 4. Solve collisions.
+    // let mut overlaps = SmallVec::<[_; 8]>::new_const();
+    // for _ in 0..12 {
+    //     overlaps.clear();
+    //     if let Some(motion) = solve_overlaps(
+    //         &inflate_shape(shape, skin_width),
+    //         position,
+    //         rotation,
+    //         up_direction,
+    //         &mut overlaps,
+    //         filter,
+    //         spatial,
+    //         |_| {},
+    //     ) {
+    //         position += motion;
+    //     }
+    //     for overlap in &overlaps {
+    //         match SlopePlane::new(
+    //             up_direction,
+    //             Dir3::new_unchecked(overlap.normal),
+    //             max_floor_angle,
+    //         ) {
+    //             SlopePlane::Floor => {
+    //                 is_on_floor = true;
+    //                 // velocity
+    //                 //     .reject_from(overlap.normal)
+    //                 //     .try_normalize()
+    //                 //     .map(|dir| {
+    //                 //         velocity = dir * velocity.length();
+    //                 //     });
+    //             }
+    //             SlopePlane::Wall => {
+    //                 is_on_wall = true;
+    //                 velocity = velocity.reject_from(overlap.normal);
+    //             }
+    //             SlopePlane::Roof => {
+    //                 is_on_roof = true;
+    //                 velocity = velocity.reject_from(overlap.normal);
+    //             }
+    //         }
+    //     }
+    // }
 
     MovementOutput {
         position,
         velocity,
         remaining: remaining_motion,
+        slide_distance: 0.0,
+        travel_distance: 0.0,
     }
 }
 
@@ -382,7 +729,7 @@ pub fn collide_and_slide2(
     }
 
     // Attempt to solve all overlaps.
-    let mut overlaps = Vec::with_capacity(8);
+    let mut overlaps = SmallVec::<[_; 8]>::new_const();
     for _ in 0..16 {
         overlaps.clear();
         if let Some(motion) = solve_overlaps(
@@ -398,7 +745,6 @@ pub fn collide_and_slide2(
                 if slope.is_floor(config.max_slope_angle) {
                     is_on_floor = true;
                 }
-
                 on_hit(normal);
             },
         ) {
@@ -509,12 +855,12 @@ struct OverlapInfo {
     depth: f32,
 }
 
-fn solve_overlaps(
+fn solve_overlaps<T: Array<Item = OverlapInfo>>(
     inflated_shape: &Collider,
     position: Vec3,
     rotation: Quat,
     up: Dir3,
-    overlaps: &mut Vec<OverlapInfo>,
+    overlaps: &mut SmallVec<T>,
     filter: &SpatialQueryFilter,
     spatial: &SpatialQuery,
     mut on_hit: impl FnMut(Vec3),
@@ -540,7 +886,6 @@ fn solve_overlaps(
                     depth: depth_sq.sqrt(),
                 });
             }
-
             overlaps.capacity() > overlaps.len()
         },
     );

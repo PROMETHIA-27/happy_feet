@@ -3960,6 +3960,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "rand 0.9.0",
+ "smallvec",
 ]
 
 [[package]]
