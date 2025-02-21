@@ -95,6 +95,30 @@ fn setup_level(
     let cuboid = Cuboid::from_length(1.0);
     let mesh = meshes.add(cuboid);
     let material = materials.add(StandardMaterial::default());
+
+    let origin = Vec3::new(-50.0, 0.0, 0.0);
+    for _ in 0..10 {
+        let offset = Vec3::new(
+            rng.random_range(-20.0..20.0),
+            0.0,
+            rng.random_range(-20.0..20.0),
+        );
+
+        let size = rng.random_range(0.1..10.0);
+        commands.spawn((
+            Transform {
+                translation: origin + offset,
+                scale: Vec3::splat(size),
+                ..Default::default()
+            },
+            RigidBody::Static,
+            Collider::from(cuboid),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+        ));
+    }
+
+    let origin = Vec3::new(50.0, 0.0, 0.0);
     for _ in 0..200 {
         let offset = Vec3::new(
             rng.random_range(-20.0..20.0),
@@ -110,10 +134,9 @@ fn setup_level(
         let size = rng.random_range(0.1..10.0);
         commands.spawn((
             Transform {
-                translation: offset,
+                translation: origin + offset,
                 rotation,
                 scale: Vec3::splat(size),
-                ..Default::default()
             },
             RigidBody::Static,
             Collider::from(cuboid),
@@ -208,8 +231,8 @@ fn update(
             transform.rotation,
             velocity.0 * time.delta_secs(),
             &CollideAndSlideConfig {
-                // skin_width: CharacterValue::Relative(0.1),
-                skin_width: CharacterValue::Relative(0.01),
+                skin_width: CharacterValue::Relative(0.1),
+                // skin_width: CharacterValue::Relative(0.01),
                 floor_snap_distance: CharacterValue::Relative(1.0),
                 max_slope_angle: 45_f32.to_radians(),
                 apply_remaining_motion: true,
@@ -219,10 +242,13 @@ fn update(
             &filter,
             &spatial,
             |normal| {
-                velocity.0 = velocity.0.reject_from(normal);
+                let length = velocity.0.length();
+                velocity.0 = velocity.0.normalize_or_zero().reject_from(normal) * length;
             },
             &mut gizmos,
         );
+
+        dbg!(velocity.0.reject_from(Vec3::Y).length());
 
         // velocity.0 = Vec3::ZERO;
         transform.translation = position;

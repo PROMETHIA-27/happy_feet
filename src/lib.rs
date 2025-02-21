@@ -95,6 +95,8 @@ pub struct CollideAndSlideConfig {
     pub floor_snap_distance: CharacterValue,
     pub normal_nudge: f32, // TODO: don't think this is needed.
     pub max_slide_count: u32,
+    pub max_step_height: CharacterValue,
+    pub min_step_width: CharacterValue,
     /// Applies the remaining motion to the motion vector when no collision was made.
     /// This should be `false` when using [`LinearVelocity`] to avoid moving at double speed.
     pub apply_remaining_motion: bool,
@@ -110,6 +112,8 @@ impl Default for CollideAndSlideConfig {
             normal_nudge: 1e-4,
             max_slide_count: 5,
             apply_remaining_motion: false,
+            max_step_height: CharacterValue::Relative(10.0),
+            min_step_width: CharacterValue::Relative(0.5),
         }
     }
 }
@@ -117,6 +121,95 @@ impl Default for CollideAndSlideConfig {
 pub struct CollideAndSlideOutput {
     pub motion: Vec3,
     pub remaining: Vec3,
+}
+
+struct MovementOutput {
+    position: Vec3,
+    velocity: Vec3,
+    remaining: Vec3,
+}
+
+pub fn collide_and_slide3(
+    mut position: Vec3,
+    rotation: Quat,
+    mut velocity: Vec3,
+    up_direction: Dir3,
+    skin_width: f32,
+    max_slope_angle: f32,
+    max_step_height: f32,
+    min_step_depth: f32,
+    step_down_height: f32,
+    shape: &Collider,
+    filter: &SpatialQueryFilter,
+    spatial: &SpatialQuery,
+    delta_time: f32,
+) -> MovementOutput {
+    let mut remaining_motion = velocity * delta_time;
+
+    let mut is_on_floor = false;
+    let mut is_on_wall = false;
+    let mut is_on_roof = false;
+
+    enum CollisionIndex {
+        First,
+        Second { first_normal: Vec3 },
+        Third,
+    }
+
+    let mut collision_index = CollisionIndex::First;
+
+    for _ in 0..16 {
+        let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
+            break;
+        };
+
+        // Sweep in movement direction.
+        let Some(hit) = spatial.cast_shape(
+            shape,
+            position,
+            rotation,
+            direction,
+            &ShapeCastConfig {
+                max_distance: length + skin_width,
+                target_distance: skin_width,
+                compute_contact_on_penetration: true,
+                ignore_origin_penetration: true,
+            },
+            filter,
+        ) else {
+            // If nothing was hit, it's safe to apply remaining motion.
+            position += mem::take(&mut remaining_motion);
+            break;
+        };
+
+        let incoming = direction * (hit.distance - skin_width); // Move a little bit away from the surface.
+
+        // Move to the hit point.
+        position += incoming;
+        remaining_motion -= incoming;
+
+        let slope = Slope::new(up_direction, Dir3::new_unchecked(hit.normal1));
+
+        match slope.plane(max_slope_angle) {
+            SlopePlane::Floor => is_on_floor = true,
+            SlopePlane::Wall => is_on_wall = true,
+            SlopePlane::Roof => is_on_roof = true,
+        }
+
+        // 1. Attempt step on wall/roof.
+
+        // 2. If not step, then slide.
+        // 2.1. Slide on floor.
+        // 2.2. Slide on wall/roof.
+
+        // 3. Snap to floor.
+    }
+
+    MovementOutput {
+        position,
+        velocity,
+        remaining: remaining_motion,
+    }
 }
 
 #[must_use]
@@ -138,12 +231,15 @@ pub fn collide_and_slide2(
     // - [ ] slope handling
     // - [ ] floor velocity
     // - [ ] only snap to floor when we touched the floor previously and no longer do,
-    // - [ ] snap to floor should run after slide
+    // - [x] snap to floor should run after slide
     // - [ ] also return new velocity
     // - [ ] stepping configuration, min width, max height, exclude dynamic bodies..
     // - [ ] detect grounded at starting pos.
 
     let skin_width = config.skin_width.eval(shape);
+    let max_step_height = config.max_step_height.eval(shape);
+    let min_step_width = config.min_step_width.eval(shape);
+
     let inflated_shape = inflate_shape(shape, skin_width);
 
     let mut position = origin;
@@ -162,7 +258,6 @@ pub fn collide_and_slide2(
     let mut collision_index = CollisionIndex::First;
 
     // Perform move and slide,
-    // this should generally run a maximum of 3 times regardless of max slide count.
     for _ in 0..config.max_slide_count {
         let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
             break;
@@ -177,7 +272,7 @@ pub fn collide_and_slide2(
             direction,
             &ShapeCastConfig {
                 max_distance: length + skin_width,
-                target_distance: skin_width, // I don't know what this does but rapier did the same.
+                target_distance: skin_width,
                 compute_contact_on_penetration: true,
                 ignore_origin_penetration: true,
             },
@@ -197,8 +292,6 @@ pub fn collide_and_slide2(
         position += incoming;
         remaining_motion -= incoming;
 
-        on_hit(hit.normal1);
-
         let slope = Slope::new(config.up, Dir3::new_unchecked(hit.normal1));
 
         gizmos.sphere(Isometry3d::from_translation(hit.point1), 2.0, BLACK);
@@ -209,28 +302,50 @@ pub fn collide_and_slide2(
             SlopePlane::Roof => is_on_roof = true,
         }
 
-        // if matches!(
-        //     slope.plane(config.max_slope_angle),
-        //     SlopePlane::Wall | SlopePlane::Roof
-        // ) {
-        //     if handle_stairs(
-        //         shape,
-        //         &mut position,
-        //         &mut remaining_motion,
-        //         rotation,
-        //         5.0,
-        //         1.0,
-        //         config.max_slope_angle,
-        //         skin_width,
-        //         config.up,
-        //         filter,
-        //         spatial,
-        //         gizmos,
-        //     ) {
-        //         collision_index = CollisionIndex::First;
-        //         continue;
-        //     }
-        // }
+        // Attempt steup up.
+        if true || !slope.is_floor(config.max_slope_angle) {
+            let min_width = 1.0;
+            let horizontal_motion = remaining_motion.reject_from(*config.up);
+            // let horizontal_motion_len_sq = horizontal_motion.length_squared();
+            // dbg!(horizontal_motion_len_sq);
+            if horizontal_motion.length_squared() > 1e-6 {
+                let horizontal_dir = horizontal_motion.normalize();
+                let target_step_pos = position
+                    + config.up * max_step_height
+                    + horizontal_dir * (min_width + skin_width);
+                if let Some(hit) = spatial.cast_shape(
+                    // &inflated_shape,
+                    shape,
+                    target_step_pos,
+                    rotation,
+                    -config.up,
+                    &ShapeCastConfig {
+                        // max_distance: max_step_height,
+                        max_distance: max_step_height + skin_width,
+                        target_distance: 0.0,
+                        compute_contact_on_penetration: true,
+                        ignore_origin_penetration: true,
+                    },
+                    filter,
+                ) {
+                    let slope = Slope::new(config.up, Dir3::new_unchecked(hit.normal1));
+                    if slope.is_floor(config.max_slope_angle) {
+                        let incoming = -config.up * (hit.distance - skin_width);
+                        position = target_step_pos + incoming;
+                        // remaining_motion -= horizontal_motion;
+                        remaining_motion -= horizontal_dir * (min_width + skin_width);
+                        // remaining_motion = remaining_motion.reject_from(hit.normal1); // Not sure about this.
+
+                        // on_hit(hit.normal1);
+
+                        collision_index = CollisionIndex::First;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        on_hit(hit.normal1);
 
         match collision_index {
             // One collision, project on plane.
@@ -243,16 +358,20 @@ pub fn collide_and_slide2(
             }
             // Two collisions, project on crease normal.
             CollisionIndex::Second { first_normal } => {
-                let Ok(crease) = Dir3::new(first_normal.cross(hit.normal1)) else {
+                // Two collisions may have the same normal,
+                // this is most likely a bug but let's ignore it for now.
+                if first_normal.dot(hit.normal1) > 1.0 - 1e-4 {
                     remaining_motion = remaining_motion.reject_from(hit.normal1);
                     continue;
-                };
+                }
 
-                remaining_motion = remaining_motion.project_onto(*crease);
+                let crease = first_normal.cross(hit.normal1).normalize();
 
-                gizmos.arrow(hit.point1, hit.point1 + crease * 4.0, LIGHT_BLUE);
+                remaining_motion = remaining_motion.project_onto(crease);
 
                 collision_index = CollisionIndex::Third;
+
+                gizmos.arrow(hit.point1, hit.point1 + crease * 4.0, LIGHT_BLUE);
             }
             // Three collisions, no motion is possible.
             CollisionIndex::Third => {
@@ -290,7 +409,7 @@ pub fn collide_and_slide2(
     let floor_snap_distance = config.floor_snap_distance.eval(shape);
 
     // Snap to floor.
-    if false && !is_on_floor && floor_snap_distance > 0.0 {
+    if !is_on_floor && floor_snap_distance > 0.0 {
         if let Some(hit) = spatial.cast_shape(
             &inflated_shape,
             position,
