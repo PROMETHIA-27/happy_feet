@@ -184,20 +184,22 @@ pub fn collide_and_slide3(
     let mut slope_index = SlopeIndex::First;
 
     for _ in 0..16 {
-        // 1. Attempt to step over things.
+        // 1. Attempt to climp slope
+        // TODO: read rapier slope code again
         let (horizontal_dir, horizontal_len) =
             Dir3::new_and_length(remaining_motion.reject_from(*up_direction))
                 // Dir3::new_and_length(remaining_motion)
                 .map(|(d, l)| (*d, l))
                 .unwrap_or_default();
 
-        let aabb = shape.aabb(position, rotation);
-        let size = aabb.size();
-        let half_height = up_direction.dot(size) / 2.0 + skin_width;
+        // let aabb = shape.aabb(position, rotation);
+        // let size = aabb.size();
+        // let half_height = up_direction.dot(size) / 2.0 + skin_width;
+        // let width = size.x.max(size.y) / 2.0;
 
         // if let Ok(horizontal_dir) = Dir3::new(remaining_motion.reject_from(*up_direction))
-        {
-            let step_up = up_direction * half_height;
+        if up_direction.dot(velocity.normalize_or_zero()) >= -1e-4 {
+            let step_up = up_direction * (max_step_height + skin_width);
             let step_forward = horizontal_dir * horizontal_len;
 
             // Sweep down from the target step location.
@@ -207,7 +209,7 @@ pub fn collide_and_slide3(
                 rotation,
                 -up_direction,
                 &ShapeCastConfig {
-                    max_distance: half_height,
+                    max_distance: max_step_height + skin_width,
                     target_distance: skin_width,
                     compute_contact_on_penetration: true,
                     ignore_origin_penetration: true,
@@ -225,15 +227,18 @@ pub fn collide_and_slide3(
                         max_floor_angle,
                     );
 
-                    if slope.is_floor() {
-                        // FIXME: this may make it possible to step through walls.
-                        let incoming = -up_direction * hit.distance;
-                        position += step_up + step_forward + incoming;
-                        remaining_motion -= step_forward;
+                    if hit.point1.dot(*up_direction) < position.dot(*up_direction) {
+                        if slope.is_floor() {
+                            // FIXME: this may make it possible to step through walls.
+                            let incoming = -up_direction * hit.distance;
 
-                        gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., BLACK);
-                    } else {
-                        gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., RED);
+                            position += step_up + step_forward + incoming;
+                            remaining_motion -= step_forward;
+
+                            gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., BLACK);
+                        } else {
+                            gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., RED);
+                        }
                     }
                 };
             }
@@ -354,8 +359,6 @@ pub fn collide_and_slide3(
             }
         }
 
-        continue;
-
         // 1.5. Attempt step up slope.
         // if slope.is_floor() {
         // {
@@ -405,29 +408,8 @@ pub fn collide_and_slide3(
                 // When first colliding with the floor or a wall, we want to remove all motion
                 // in the direction of the hit normal, i.e., project the motion on the normal plane.
                 SlopeIndex::First => {
-                    match slope {
-                        // When moving on the floor, we want the speed to be the same regardless of angle.
-                        // FIXME: this is probably wrong.
-                        SlopePlane::Floor => {
-                            // remaining_motion = remaining_motion.reject_from(hit.normal1);
-                            remaining_motion
-                                .reject_from(hit.normal1)
-                                .try_normalize()
-                                .map(|dir| {
-                                    remaining_motion = dir * remaining_motion.length();
-                                });
-                            // velocity
-                            //     .reject_from(hit.normal1)
-                            //     .try_normalize()
-                            //     .map(|dir| {
-                            //         velocity = dir * velocity.length();
-                            //     });
-                        }
-                        SlopePlane::Wall | SlopePlane::Roof => {
-                            remaining_motion = remaining_motion.reject_from(hit.normal1);
-                            // velocity = velocity.reject_from(hit.normal1);
-                        }
-                    }
+                    remaining_motion = remaining_motion.reject_from(hit.normal1);
+                    velocity = velocity.reject_from(hit.normal1);
                     slope_index = SlopeIndex::Second {
                         first_normal: hit.normal1,
                     };
@@ -441,23 +423,8 @@ pub fn collide_and_slide3(
                     if first_normal.dot(hit.normal1) < 1.0 - 1e-4 =>
                 {
                     let crease = first_normal.cross(hit.normal1).normalize();
-                    match slope {
-                        SlopePlane::Floor => {
-                            remaining_motion
-                                .project_onto(crease)
-                                .try_normalize()
-                                .map(|dir| {
-                                    remaining_motion = dir * remaining_motion.length();
-                                });
-                            velocity.project_onto(crease).try_normalize().map(|dir| {
-                                // velocity = dir * velocity.length();
-                            });
-                        }
-                        SlopePlane::Wall | SlopePlane::Roof => {
-                            remaining_motion = remaining_motion.project_onto(crease);
-                            // velocity = velocity.project_onto(crease);
-                        }
-                    }
+                    remaining_motion = remaining_motion.project_onto(crease);
+                    velocity = velocity.project_onto(crease);
                     slope_index = SlopeIndex::Third;
                 }
                 // When the character is sliding on three unique normals, all remaining motion is cancelled out.
@@ -508,47 +475,47 @@ pub fn collide_and_slide3(
     // }
 
     // 4. Solve collisions.
-    // let mut overlaps = SmallVec::<[_; 8]>::new_const();
-    // for _ in 0..12 {
-    //     overlaps.clear();
-    //     if let Some(motion) = solve_overlaps(
-    //         &inflate_shape(shape, skin_width),
-    //         position,
-    //         rotation,
-    //         up_direction,
-    //         &mut overlaps,
-    //         filter,
-    //         spatial,
-    //         |_| {},
-    //     ) {
-    //         position += motion;
-    //     }
-    //     for overlap in &overlaps {
-    //         match SlopePlane::new(
-    //             up_direction,
-    //             Dir3::new_unchecked(overlap.normal),
-    //             max_floor_angle,
-    //         ) {
-    //             SlopePlane::Floor => {
-    //                 is_on_floor = true;
-    //                 // velocity
-    //                 //     .reject_from(overlap.normal)
-    //                 //     .try_normalize()
-    //                 //     .map(|dir| {
-    //                 //         velocity = dir * velocity.length();
-    //                 //     });
-    //             }
-    //             SlopePlane::Wall => {
-    //                 is_on_wall = true;
-    //                 velocity = velocity.reject_from(overlap.normal);
-    //             }
-    //             SlopePlane::Roof => {
-    //                 is_on_roof = true;
-    //                 velocity = velocity.reject_from(overlap.normal);
-    //             }
-    //         }
-    //     }
-    // }
+    let mut overlaps = SmallVec::<[_; 8]>::new_const();
+    for _ in 0..12 {
+        overlaps.clear();
+        if let Some(motion) = solve_overlaps(
+            &inflate_shape(shape, skin_width),
+            position,
+            rotation,
+            up_direction,
+            &mut overlaps,
+            filter,
+            spatial,
+            |_| {},
+        ) {
+            position += motion;
+        }
+        for overlap in &overlaps {
+            match SlopePlane::new(
+                up_direction,
+                Dir3::new_unchecked(overlap.normal),
+                max_floor_angle,
+            ) {
+                SlopePlane::Floor => {
+                    is_on_floor = true;
+                    // velocity
+                    //     .reject_from(overlap.normal)
+                    //     .try_normalize()
+                    //     .map(|dir| {
+                    //         velocity = dir * velocity.length();
+                    //     });
+                }
+                SlopePlane::Wall => {
+                    is_on_wall = true;
+                    velocity = velocity.reject_from(overlap.normal);
+                }
+                SlopePlane::Roof => {
+                    is_on_roof = true;
+                    velocity = velocity.reject_from(overlap.normal);
+                }
+            }
+        }
+    }
 
     MovementOutput {
         position,

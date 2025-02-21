@@ -21,6 +21,8 @@ fn main() -> AppExit {
         .run()
 }
 
+const SKIN_WIDTH: f32 = 0.1;
+
 #[derive(Component)]
 #[require(Transform)]
 struct CameraArm;
@@ -47,7 +49,10 @@ fn setup_player(
             MeshMaterial3d(materials.add(StandardMaterial::default())),
         ))
         .with_children(|player| {
-            player.spawn((Collider::capsule(1.0 + 1.0, 2.0), CollisionLayers::NONE));
+            player.spawn((
+                Collider::capsule(1.0 + SKIN_WIDTH, 2.0),
+                CollisionLayers::NONE,
+            ));
             player
                 .spawn((CameraArm, Transform {
                     translation: Vec3::Y * 2.0,
@@ -236,9 +241,9 @@ fn update(
             transform.rotation,
             velocity.0,
             Dir3::Y,
-            1.0,
+            SKIN_WIDTH,
             60_f32.to_radians(),
-            4.0,
+            0.0,
             0.25,
             10.0,
             shape,
