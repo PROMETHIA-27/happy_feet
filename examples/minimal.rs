@@ -353,7 +353,7 @@ fn update(
         *noclip_enabled = !*noclip_enabled;
     }
 
-    for (entity, shape, mut transform, mut velocity, input, mode, floor) in &mut query {
+    for (entity, shape, mut transform, mut velocity, input, mode, mut floor) in &mut query {
         let inherited_velocity;
         if let Some((vel, platform_trans)) = floor.and_then(|p| platforms.get(p.entity).ok()) {
             let offset = transform.translation - platform_trans.translation;
@@ -371,21 +371,36 @@ fn update(
                     if key.just_pressed(KeyCode::Space) {
                         let jump_vec = Vec3::Y * 15.0;
                         *vel = vel.reject_from(Vec3::Y) + jump_vec;
+                        floor = None;
                     }
 
-                    let up = floor.map(|f| f.normal).unwrap_or(Dir3::Y);
                     let dir = (transform.rotation * input.buffered.normalize_or_zero())
                         .reject_from(Vec3::Y)
                         .normalize_or_zero();
 
-                    // *vel -= vel.reject_from(*up) * 20.0 * time.delta_secs(); // Friction
+                    let target_speed = 15.0;
+                    let max_acceleration;
                     if floor.is_some() {
-                        *vel += dir * 400.0 * time.delta_secs(); // Input
-                        *vel -= *vel * 20.0 * time.delta_secs(); // Friction
+                        // Friction
+                        let len = vel.length();
+                        *vel -=
+                            vel.normalize_or_zero() * f32::min(len, len * 10.0 * time.delta_secs());
+
+                        max_acceleration = 200.0;
                     } else {
-                        *vel += dir * 40.0 * time.delta_secs(); // Input
+                        max_acceleration = 50.0;
                         *vel -= Vec3::Y * time.delta_secs() * 20.0; // Gravity
-                        // *vel -= vel.reject_from(Vec3::Y) * 20.0 * time.delta_secs(); // Friction
+                    }
+
+                    if let Ok(dir) = Dir3::new(dir) {
+                        // Movement
+                        *vel += acceleration(
+                            *vel,
+                            dir,
+                            max_acceleration,
+                            target_speed,
+                            time.delta_secs(),
+                        );
                     }
                 }
                 MovementMode::Flying => {
@@ -415,9 +430,9 @@ fn update(
             45_f32.to_radians(),
             0.0,
             0.5,
-            0.1,
+            0.5,
             true,
-            true,
+            false,
             true,
             shape,
             &filter,
@@ -466,4 +481,23 @@ where
         y: button_axis(input, y),
         z: button_axis(input, z),
     }
+}
+
+pub fn acceleration(
+    velocity: Vec3,
+    direction: Dir3,
+    max_acceleration: f32,
+    target_speed: f32,
+    delta: f32,
+) -> Vec3 {
+    // Current speed in the desired direction.
+    let current_speed = velocity.dot(*direction);
+
+    // No acceleration is needed if current speed exceeds target.
+    if current_speed >= target_speed {
+        return Vec3::ZERO;
+    }
+    // Clamp to avoid acceleration past the target speed.
+    let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
+    accel_speed * direction
 }

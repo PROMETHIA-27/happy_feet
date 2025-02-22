@@ -130,6 +130,8 @@ pub struct MovementOutput {
 
 // FIXME:
 // - character can get stuck on sharp edges while moving in the air.
+// - cannot jump while floor_snap_distance > 0.0,
+// event when was_on_floor is set to false.
 pub fn collide_and_slide(
     was_on_floor: bool,
     mut position: Vec3,
@@ -167,7 +169,7 @@ pub fn collide_and_slide(
 
         // 1. Climb walkable slopes, also snap to floor.
         // This is done to avoid losing speed when walking up slopes and ledges.
-        if climb_walkable_slopes {
+        if was_on_floor && climb_walkable_slopes {
             let offset = skin_width + 1e-4;
             let step_up = up_direction * offset;
             let step_forward = direction * length;
@@ -206,7 +208,7 @@ pub fn collide_and_slide(
                         let below_body =
                             hit.point1.dot(*up_direction) < new_position.dot(*up_direction);
 
-                        if below_body && (initial_hit || was_on_floor) {
+                        if below_body {
                             floor = Some(Floor {
                                 entity: hit.entity,
                                 normal: Dir3::new_unchecked(hit.normal1),
