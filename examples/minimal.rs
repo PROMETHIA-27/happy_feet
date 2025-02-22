@@ -1,11 +1,11 @@
 use std::{hash::Hash, ops::Range};
 
 use avian3d::{math::PI, prelude::*};
-use bevy::{input::mouse::MouseMotion, math::primitives, prelude::*};
+use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
-    CharacterValue, CollideAndSlideConfig, collide_and_slide, collide_and_slide2,
-    collide_and_slide3,
+    CalculatedVelocity, MovingPlatform, RotatingPlatform, StandingOn, collide_and_slide3,
+    update_platform_velocity,
 };
 
 fn main() -> AppExit {
@@ -15,13 +15,26 @@ fn main() -> AppExit {
             PhysicsPlugins::new(FixedPostUpdate),
             PhysicsDebugPlugin::new(FixedPostUpdate),
         ))
-        .add_systems(Startup, (setup_player, setup_level))
+        .add_systems(Startup, setup_player)
+        .add_systems(
+            Startup,
+            (
+                setup_level,
+                setup_stairs,
+                setup_slopes,
+                setup_rubble,
+                setup_platforms,
+            ),
+        )
         .add_systems(Update, input)
-        .add_systems(FixedUpdate, update)
+        .add_systems(
+            FixedUpdate,
+            (update_platforms, update_platform_velocity, update).chain(),
+        )
         .run()
 }
 
-const SKIN_WIDTH: f32 = 0.1;
+const SKIN_WIDTH: f32 = 0.2;
 
 #[derive(Component)]
 #[require(Transform)]
@@ -65,6 +78,156 @@ fn setup_player(
         });
 }
 
+fn setup_slopes(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cuboid = Cuboid::from_length(1.0);
+    let mesh = meshes.add(cuboid);
+    let material = materials.add(StandardMaterial::default());
+
+    let height = 40.0;
+    let width = 10.0;
+    let origin = Vec3::new(-width * 2.5, -height / 2.0, -30.0);
+
+    for i in 1..5 {
+        let angle = i as f32 / PI;
+        let rotation = Quat::from_axis_angle(Vec3::X, angle);
+        let offset = Vec3::X * i as f32 * width;
+        commands.spawn((
+            Transform {
+                translation: origin + offset,
+                rotation,
+                scale: Vec3::new(width, height, height),
+                ..Default::default()
+            },
+            RigidBody::Static,
+            Collider::from(cuboid),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+        ));
+    }
+}
+
+fn setup_stairs(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cuboid = Cuboid::from_length(1.0);
+    let mesh = meshes.add(cuboid);
+    let material = materials.add(StandardMaterial::default());
+
+    let depth = 4.0;
+    let width = 30.0;
+    let height_factor = 0.2;
+    let origin = Vec3::new(20.0 - depth, 0.0, 0.0);
+    for i in 1..9 {
+        let height = i as f32 * i as f32 * height_factor;
+        let offset = Vec3::X * i as f32 * depth + Vec3::Y * height / 2.0;
+        commands.spawn((
+            Transform {
+                translation: origin + offset,
+                scale: Vec3::new(depth, height, width),
+                ..Default::default()
+            },
+            RigidBody::Static,
+            Collider::from(cuboid),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+        ));
+    }
+}
+
+fn setup_rubble(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mut rng = rng();
+    let cuboid = Cuboid::from_length(1.0);
+    let mesh = meshes.add(cuboid);
+    let material = materials.add(StandardMaterial::default());
+
+    let origin = Vec3::new(-50.0, 0.0, 0.0);
+    for _ in 0..200 {
+        let dist = rng.random_range(0.0_f32..1.0_f32).powi(2) * 30.0;
+        let angle = rng.random_range(-PI..PI);
+        let offset = Quat::from_rotation_y(angle) * (Vec3::X * dist);
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            rng.random_range(-PI..PI),
+            rng.random_range(-PI..PI),
+            rng.random_range(-PI..PI),
+        );
+        let size = rng.random_range(0.1..10.0);
+        commands.spawn((
+            Transform {
+                translation: origin + offset,
+                rotation,
+                scale: Vec3::splat(size),
+            },
+            RigidBody::Static,
+            Collider::from(cuboid),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+        ));
+    }
+}
+
+fn setup_platforms(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cuboid = Cuboid::from_length(1.0);
+    let mesh = meshes.add(cuboid);
+    let material = materials.add(StandardMaterial::default());
+
+    let height = 1.0;
+    let width = 10.0;
+    let origin = Vec3::new(0.0, 0.0, 25.0);
+    commands.spawn((
+        MovingPlatform {
+            start: origin,
+            end: origin + Vec3::Y * 10.0,
+            speed: 1.0,
+        },
+        RotatingPlatform {
+            axis: Dir3::Y,
+            speed: 1.0,
+        },
+        Transform {
+            translation: origin,
+            scale: Vec3::new(width, height, width),
+            ..Default::default()
+        },
+        RigidBody::Static,
+        Collider::from(cuboid),
+        Mesh3d(mesh.clone()),
+        MeshMaterial3d(material.clone()),
+    ));
+}
+
+fn update_platforms(
+    mut query: Query<(&mut Transform, AnyOf<(&MovingPlatform, &RotatingPlatform)>)>,
+    time: Res<Time>,
+) {
+    for (mut transform, platform) in &mut query {
+        if let Some(platform) = platform.0 {
+            let pos = platform.start.lerp(
+                platform.end,
+                (time.elapsed_secs() * platform.speed).sin() / 2.0 + 0.5,
+            );
+            transform.translation = pos;
+        }
+        if let Some(platform) = platform.1 {
+            transform.rotate_axis(platform.axis, platform.speed * time.delta_secs());
+        }
+    }
+}
+
 fn setup_level(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -88,72 +251,6 @@ fn setup_level(
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(100.0)))),
         MeshMaterial3d(materials.add(StandardMaterial::default())),
     ));
-
-    commands.spawn((
-        Transform {
-            translation: Vec3::new(50.0, 0.0, 50.0),
-            ..Default::default()
-        },
-        RigidBody::Static,
-        Collider::sphere(25.0),
-        Mesh3d(meshes.add(Sphere::new(25.0))),
-        MeshMaterial3d(materials.add(StandardMaterial::default())),
-    ));
-
-    let mut rng = rng();
-    let cuboid = Cuboid::from_length(1.0);
-    let mesh = meshes.add(cuboid);
-    let material = materials.add(StandardMaterial::default());
-
-    let origin = Vec3::new(-50.0, 0.0, 0.0);
-    for _ in 0..20 {
-        let offset = Vec3::new(
-            rng.random_range(-20.0..20.0),
-            rng.random_range(0.0..10.0),
-            rng.random_range(-20.0..20.0),
-        );
-
-        let size = rng.random_range(1.0..10.0);
-        let height = rng.random_range(1.0..2.0);
-        commands.spawn((
-            Transform {
-                translation: origin + offset,
-                scale: Vec3::new(size, height, size),
-                ..Default::default()
-            },
-            RigidBody::Static,
-            Collider::from(cuboid),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-        ));
-    }
-
-    let origin = Vec3::new(50.0, 0.0, 0.0);
-    for _ in 0..200 {
-        let offset = Vec3::new(
-            rng.random_range(-20.0..20.0),
-            0.0,
-            rng.random_range(-20.0..20.0),
-        );
-        let rotation = Quat::from_euler(
-            EulerRot::XYZ,
-            rng.random_range(-PI..PI),
-            rng.random_range(-PI..PI),
-            rng.random_range(-PI..PI),
-        );
-        let size = rng.random_range(0.1..10.0);
-        commands.spawn((
-            Transform {
-                translation: origin + offset,
-                rotation,
-                scale: Vec3::splat(size),
-            },
-            RigidBody::Static,
-            Collider::from(cuboid),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-        ));
-    }
 }
 
 fn input(
@@ -189,12 +286,23 @@ fn input(
 struct CharacterVelocity(Vec3);
 
 fn update(
+    mut commands: Commands,
     mut noclip_enabled: Local<bool>,
     mut gravity_enabled: Local<bool>,
     collisions: Res<Collisions>,
     mut gizmos: Gizmos,
     spatial: SpatialQuery,
-    mut query: Query<(Entity, &Collider, &mut Transform, &mut CharacterVelocity), With<Player>>,
+    mut query: Query<
+        (
+            Entity,
+            &Collider,
+            &mut Transform,
+            &mut CharacterVelocity,
+            Option<&StandingOn>,
+        ),
+        With<Player>,
+    >,
+    platforms: Query<(&CalculatedVelocity, &Transform), Without<Player>>,
     time: Res<Time>,
     key: Res<ButtonInput<KeyCode>>,
 ) {
@@ -214,8 +322,19 @@ fn update(
         *noclip_enabled = !*noclip_enabled;
     }
 
-    for (entity, shape, mut transform, mut velocity) in &mut query {
-        let collisions = collisions.collisions_with_entity(entity);
+    for (entity, shape, mut transform, mut velocity, standing_on) in &mut query {
+        let inherited_velocity;
+        if let Some((vel, platform_trans)) = standing_on.and_then(|p| platforms.get(p.0).ok()) {
+            let offset = transform.translation - platform_trans.translation;
+            let tangental_vel = vel.angular.cross(offset);
+            inherited_velocity = vel.linear + tangental_vel;
+        } else {
+            inherited_velocity = Vec3::ZERO
+        }
+
+        if inherited_velocity.length_squared() > 0.01 {
+            dbg!(inherited_velocity);
+        }
 
         if *gravity_enabled {
             velocity.0 += (transform.rotation * input)
@@ -235,26 +354,36 @@ fn update(
             continue;
         }
 
+        transform.translation += inherited_velocity * time.delta_secs();
+
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
+        // let mut velocities = [velocity.0];
         let out = collide_and_slide3(
             transform.translation,
             transform.rotation,
             velocity.0,
             Dir3::Y,
             SKIN_WIDTH,
-            60_f32.to_radians(),
-            0.0,
-            0.25,
-            10.0,
+            45_f32.to_radians(),
+            2.0,
+            0.5,
+            1.0,
             shape,
             &filter,
             &spatial,
             time.delta_secs(),
             &mut gizmos,
         );
+
         let delta = transform.translation - out.position;
         transform.translation = out.position;
         velocity.0 = out.velocity;
+
+        if let Some(e) = out.floor_entity {
+            commands.entity(entity).insert(StandingOn(e));
+        } else if standing_on.is_some() {
+            commands.entity(entity).remove::<StandingOn>();
+        }
 
         // dbg!(delta.reject_from(Vec3::Y).length());
 
