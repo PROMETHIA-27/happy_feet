@@ -1,18 +1,11 @@
-use std::{mem, ops::DerefMut};
-
 use avian3d::{math::PI, parry::shape::TypedShape, prelude::*};
 use bevy::{
     color::palettes::css::*,
     ecs::{component::ComponentId, world::DeferredWorld},
     prelude::*,
 };
-use smallvec::{Array, SmallVec};
-
-struct Character {
-    floor_entity: Option<Entity>,
-}
-
-struct OnStep;
+use smallvec::SmallVec;
+use std::mem;
 
 // TODO: components and systems for character.
 
@@ -83,8 +76,8 @@ enum SlopePlane {
 
 #[derive(Debug, Clone, Copy)]
 struct Slope {
-    normal: Dir3,
     up: Dir3,
+    normal: Dir3,
     angle: f32,
     plane: SlopePlane,
 }
@@ -96,7 +89,6 @@ impl Slope {
         if angle > PI / 2.0 {
             Self {
                 angle,
-
                 plane: SlopePlane::Roof,
                 normal,
                 up,
@@ -130,12 +122,10 @@ pub struct Floor {
 }
 
 pub struct MovementOutput {
-    pub position: Vec3,
     pub velocity: Vec3,
+    pub motion: Vec3,
     pub remaining_motion: Vec3,
     pub floor: Option<Floor>,
-    pub is_on_wall: bool,
-    pub is_on_roof: bool,
 }
 
 pub struct MovementConfig {
@@ -157,17 +147,17 @@ pub fn move_character(
     spatial: &SpatialQuery,
     filter: &SpatialQueryFilter,
     delta_secs: f32,
-) -> (Vec3, Vec3, Option<Floor>) {
+) -> MovementOutput {
     let mut motion = Vec3::ZERO;
     let mut remaining_motion = velocity * delta_secs;
 
     let inflated_shape = inflate_shape(shape, config.skin_width);
 
-    let mut slope_index = SlopeIndex::First;
+    let mut index = SlopeIndex::First;
 
     let mut floor = None;
 
-    for _ in 0..6 {
+    for _ in 0..12 {
         // Sweep in the movement direction.
         if let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) {
             if let Some(hit) = spatial.cast_shape(
@@ -226,7 +216,7 @@ pub fn move_character(
                         normal: overlap.normal,
                     });
                 } else {
-                    project_motion(was_on_floor, &mut slope_index, slope, [
+                    project_motion(was_on_floor, &mut index, slope, [
                         &mut remaining_motion,
                         &mut velocity,
                     ]);
@@ -241,7 +231,7 @@ pub fn move_character(
     }
 
     // Solve remaining overlaps.
-    for _ in 0..4 {
+    for _ in 0..6 {
         if let Some((fixup, overlaps)) = solve_overlaps::<8>(
             &inflated_shape,
             origin + motion,
@@ -267,7 +257,7 @@ pub fn move_character(
                         normal: overlap.normal,
                     });
                 } else {
-                    project_motion(was_on_floor, &mut slope_index, slope, [&mut velocity]);
+                    project_motion(was_on_floor, &mut index, slope, [&mut velocity]);
                 }
             }
         } else {
@@ -309,7 +299,12 @@ pub fn move_character(
         );
     }
 
-    (motion, velocity, floor)
+    MovementOutput {
+        velocity,
+        motion,
+        remaining_motion,
+        floor,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

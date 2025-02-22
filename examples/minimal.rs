@@ -422,7 +422,7 @@ fn update(
 
         transform.translation += inherited_velocity * time.delta_secs();
 
-        let (offset, new_vel, new_floor) = move_character(
+        let output = move_character(
             floor.is_some() && !jumped,
             transform.translation,
             velocity.0,
@@ -438,10 +438,10 @@ fn update(
             &filter,
             time.delta_secs(),
         );
-        transform.translation += offset;
-        velocity.0 = new_vel;
+        transform.translation += output.motion;
+        velocity.0 = output.velocity;
 
-        if let Some(new_floor) = new_floor {
+        if let Some(new_floor) = output.floor {
             if floor.is_none() && !jumped {
                 println!("ON FLOOR");
                 commands.entity(entity).insert(new_floor);
