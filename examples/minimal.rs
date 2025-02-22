@@ -4,8 +4,8 @@ use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
-    CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, collide_and_slide,
-    move_character, update_platform_velocity,
+    CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, move_character,
+    update_platform_velocity,
 };
 
 fn main() -> AppExit {
@@ -40,7 +40,7 @@ fn main() -> AppExit {
         .run()
 }
 
-const SKIN_WIDTH: f32 = 0.5;
+const SKIN_WIDTH: f32 = 0.333;
 
 #[derive(Component)]
 #[require(Transform)]
@@ -451,39 +451,6 @@ fn update(
             velocity.0 += inherited_velocity;
             commands.entity(entity).remove::<Floor>();
         }
-
-        // let out = collide_and_slide(
-        //     floor.is_some(),
-        //     transform.translation,
-        //     transform.rotation,
-        //     velocity.0,
-        //     Dir3::Y,
-        //     SKIN_WIDTH,
-        //     45_f32.to_radians(),
-        //     0.0,
-        //     0.5,
-        //     0.5,
-        //     true,
-        //     false,
-        //     true,
-        //     shape,
-        //     &filter,
-        //     &spatial,
-        //     time.delta_secs(),
-        //     &mut gizmos,
-        // );
-
-        // let delta = transform.translation - out.position;
-        // // dbg!(delta.reject_from(Vec3::Y).length());
-        // transform.translation = out.position;
-        // velocity.0 = out.velocity;
-
-        // if let Some(floor) = out.floor {
-        //     commands.entity(entity).insert(floor);
-        // } else if floor.is_some() {
-        //     velocity.0 += inherited_velocity;
-        //     commands.entity(entity).remove::<Floor>();
-        // }
     }
 }
 
