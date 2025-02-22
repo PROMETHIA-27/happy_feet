@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, ops::DerefMut};
 
 use avian3d::{math::PI, parry::shape::TypedShape, prelude::*};
 use bevy::{
@@ -48,9 +48,6 @@ pub struct CalculatedVelocity {
     pub angular: Vec3,
 }
 
-#[derive(Component, Deref)]
-pub struct StandingOn(pub Entity);
-
 pub fn update_platform_velocity(
     mut query: Query<(&mut PreviousTransform, &Transform, &mut CalculatedVelocity)>,
     time: Res<Time>,
@@ -84,43 +81,57 @@ enum SlopePlane {
     Roof,
 }
 
-impl SlopePlane {
+struct Slope {
+    angle: f32,
+    plane: SlopePlane,
+}
+
+impl Slope {
     fn new(up_direction: Dir3, normal: Dir3, max_floor_angle: f32) -> Self {
         let angle = f32::acos(normal.dot(*up_direction));
-        match angle {
-            a if a > PI / 2.0 => Self::Roof,
-            a if a > max_floor_angle => Self::Wall,
-            _ => Self::Floor,
+
+        if angle > PI / 2.0 {
+            Self {
+                angle,
+                plane: SlopePlane::Roof,
+            }
+        } else if angle > max_floor_angle {
+            Self {
+                angle,
+                plane: SlopePlane::Wall,
+            }
+        } else {
+            Self {
+                angle,
+                plane: SlopePlane::Floor,
+            }
         }
     }
 
     fn is_floor(&self) -> bool {
-        matches!(self, SlopePlane::Floor)
+        matches!(self.plane, SlopePlane::Floor)
     }
+}
 
-    fn is_wall(&self) -> bool {
-        matches!(self, SlopePlane::Wall)
-    }
-
-    fn is_roof(&self) -> bool {
-        matches!(self, SlopePlane::Roof)
-    }
+#[derive(Component, Clone, Copy)]
+pub struct Floor {
+    pub entity: Entity,
+    pub normal: Dir3,
 }
 
 pub struct MovementOutput {
     pub position: Vec3,
     pub velocity: Vec3,
-    pub remaining: Vec3,
-    pub slide_distance: f32,
-    pub travel_distance: f32,
-    pub floor_entity: Option<Entity>,
+    pub remaining_motion: Vec3,
+    pub floor: Option<Floor>,
     pub is_on_wall: bool,
     pub is_on_roof: bool,
 }
 
-// FIXME: moving towards a wall while also climbing up a slope results in sudden bursts of speed.
-// This is appears to be caused by both "climb walkable slopes" and "step over walls".
-pub fn collide_and_slide3(
+// FIXME:
+// - character can get stuck on sharp edges while moving in the air.
+pub fn collide_and_slide(
+    was_on_floor: bool,
     mut position: Vec3,
     rotation: Quat,
     mut velocity: Vec3,
@@ -129,8 +140,9 @@ pub fn collide_and_slide3(
     max_floor_angle: f32,
     max_step_height: f32,
     min_step_depth: f32,
-    floor_snap_length: f32,
+    floor_snap_distance: f32,
     climb_walkable_slopes: bool,
+    should_solve_overlaps: bool,
     apply_remaining_motion: bool,
     shape: &Collider,
     filter: &SpatialQueryFilter,
@@ -142,17 +154,9 @@ pub fn collide_and_slide3(
 
     let mut remaining_motion = velocity * delta_time;
 
-    let mut floor_entity = None;
+    let mut floor: Option<Floor> = None;
     let mut is_on_wall = false;
     let mut is_on_roof = false;
-
-    // 0. Detect grounded and snap out of floor.
-
-    enum SlopeIndex {
-        First,
-        Second { first_normal: Vec3 },
-        Third,
-    }
 
     let mut slope_index = SlopeIndex::First;
 
@@ -161,55 +165,72 @@ pub fn collide_and_slide3(
             break;
         };
 
-        // 1. Climb walkable slopes.
+        // 1. Climb walkable slopes, also snap to floor.
         // This is done to avoid losing speed when walking up slopes and ledges.
-        //
-        // TODO: this should be possible to disable via an option.
         if climb_walkable_slopes {
-            let step_up = 2.0 * skin_width * up_direction;
+            let offset = skin_width + 1e-4;
+            let step_up = up_direction * offset;
             let step_forward = direction * length;
 
             // Sweep down from the target step location.
-            if let Some(hit) = spatial.cast_shape(
+            let max_hits = 8;
+            let mut i = 0;
+            spatial.shape_hits_callback(
                 &inflated_shape,
                 position + step_up + step_forward,
                 rotation,
                 -up_direction,
                 &ShapeCastConfig {
-                    max_distance: skin_width * 2.0,
+                    max_distance: floor_snap_distance + offset,
                     target_distance: skin_width,
                     compute_contact_on_penetration: true,
                     ignore_origin_penetration: true,
                 },
                 filter,
-            ) {
-                {
-                    // Only climb when hit point is below character, e.g., not roof.
-                    if hit.point1.dot(*up_direction) < position.dot(*up_direction) {
-                        let slope = SlopePlane::new(
-                            up_direction,
-                            Dir3::new_unchecked(hit.normal1),
-                            max_floor_angle,
-                        );
-                        if slope.is_floor() {
-                            // FIXME: this may make it possible to step through walls.
-                            let incoming = -up_direction * hit.distance;
+                |hit| {
+                    i += 1;
 
-                            position += step_up + step_forward + incoming;
+                    let slope = Slope::new(
+                        up_direction,
+                        Dir3::new_unchecked(hit.normal1),
+                        max_floor_angle,
+                    );
+
+                    // TODO: this may need some additional checks to make sure the character
+                    // can actually stand here.
+                    if slope.is_floor() {
+                        let incoming = -up_direction * hit.distance; // FIXME: this may make it possible to step through walls?
+                        let new_position = position + step_up + step_forward + incoming;
+
+                        let initial_hit = hit.distance <= offset;
+                        let below_body =
+                            hit.point1.dot(*up_direction) < new_position.dot(*up_direction);
+
+                        if below_body && (initial_hit || was_on_floor) {
+                            floor = Some(Floor {
+                                entity: hit.entity,
+                                normal: Dir3::new_unchecked(hit.normal1),
+                            });
+
+                            position = new_position;
                             remaining_motion -= step_forward;
 
                             gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., WHITE);
                         } else {
                             gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., RED);
                         }
-                    } else {
-                        gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., BLACK);
+
+                        return false;
                     }
-                };
-            }
+
+                    gizmos.sphere(Isometry3d::from_translation(hit.point1), 1., RED);
+
+                    i < max_hits
+                },
+            );
         }
 
-        // 2. Sweep for collisions in movement direction.
+        // Sweep for collisions in movement direction.
         let Some(hit) = spatial.cast_shape(
             shape,
             position,
@@ -224,10 +245,6 @@ pub fn collide_and_slide3(
             filter,
         ) else {
             // If nothing was hit, it's safe to apply remaining motion.
-            //
-            // Sometimes this is undesired, like when using LinearVelocity
-            // the rest of the movement would be applied twice since kinematic bodies
-            // are automatically moved according to velocity each frame.
             if apply_remaining_motion {
                 position += mem::take(&mut remaining_motion);
             }
@@ -240,19 +257,24 @@ pub fn collide_and_slide3(
         position += incoming;
         remaining_motion -= incoming;
 
-        let slope = SlopePlane::new(
+        let slope = Slope::new(
             up_direction,
             Dir3::new_unchecked(hit.normal1),
             max_floor_angle,
         );
 
-        match slope {
-            SlopePlane::Floor => floor_entity = Some(hit.entity),
+        match slope.plane {
+            SlopePlane::Floor => {
+                floor = Some(Floor {
+                    entity: hit.entity,
+                    normal: Dir3::new_unchecked(hit.normal1),
+                })
+            }
             SlopePlane::Wall => is_on_wall = true,
             SlopePlane::Roof => is_on_roof = true,
         }
 
-        // 3. Attempt to step over walls.
+        // 2. Attempt to step over walls.
         //
         // FIXME: This does not work for stepping over walls at extreme angles.
         let mut did_step = false;
@@ -281,11 +303,12 @@ pub fn collide_and_slide3(
                         filter,
                     ) {
                         // Only step if the slope is walkable.
-                        if let SlopePlane::Floor = SlopePlane::new(
+                        let slope = Slope::new(
                             up_direction,
                             Dir3::new_unchecked(hit.normal1),
                             max_floor_angle,
-                        ) {
+                        );
+                        if slope.is_floor() {
                             let incoming = -up_direction * (hit.distance - skin_width);
                             let new_position = position + step_up + step_forward + incoming;
 
@@ -310,151 +333,185 @@ pub fn collide_and_slide3(
 
                                 did_step = true;
                             }
-                        };
+                        }
                     }
                 }
             }
         }
 
-        // 4. Slide if no step was possible.
+        // 3. Slide if no step was possible.
+        //
+        // FIXME: It's possible to slowly climb non walkable slopes for some reason.
         if !did_step {
-            match slope_index {
-                // We want to remove all motion in the direction of the hit normal,
-                // i.e., project the motion on the normal plane.
-                SlopeIndex::First => {
-                    remaining_motion = remaining_motion.reject_from(hit.normal1);
-                    velocity = velocity.reject_from(hit.normal1);
-
-                    slope_index = SlopeIndex::Second {
-                        first_normal: hit.normal1,
-                    };
-                }
-                // Since the previous iteration changed the motion direction, doing so again might
-                // result in a new motion where no parts of it existed in the original velocity.
-                // This may result in the character "shaking" when walking into a corner.
-                //
-                // We solve this by projecting onto a "crease" normal instead.
-                SlopeIndex::Second { first_normal } => {
-                    // Do nothing if the normal is identical to the previous one.
-                    if first_normal.dot(hit.normal1) < 1.0 - 1e-4 {
-                        let crease = first_normal.cross(hit.normal1).normalize();
-
-                        remaining_motion = remaining_motion.project_onto(crease);
-                        velocity = velocity.project_onto(crease);
-
-                        slope_index = SlopeIndex::Third;
-                    }
-                }
-                // When the character is sliding on three unique normals, no more motion is possible.
-                SlopeIndex::Third => {
-                    remaining_motion = Vec3::ZERO;
-                    velocity = Vec3::ZERO;
-                }
-            }
-            // Remove vertical motion when the slope is not walkable.
-            if !slope.is_floor() {
-                remaining_motion -= *up_direction * remaining_motion.dot(*up_direction).max(0.0);
-                velocity -= *up_direction * velocity.dot(*up_direction).max(0.0);
-            }
+            project_motion_on_slope(
+                floor.is_some(),
+                &mut slope_index,
+                Dir3::new_unchecked(hit.normal1),
+                up_direction,
+                max_floor_angle,
+                [&mut remaining_motion, &mut velocity],
+            );
         }
     }
 
-    // 5. Snap to floor.
+    // 4. Snap to floor.
     //
     // FIXME: this can lead to sliding down corners rather than falling when moving off ledges.
     // Unreal engine has an option that fixes this but introduces a new issue if I remember
     // correctly, might be worth looking into.
-    if floor_entity.is_none() && floor_snap_length > 0.0 {
-        if let Some(hit) = spatial.cast_shape(
-            &inflated_shape,
-            position,
-            rotation,
-            -up_direction,
-            &ShapeCastConfig {
-                max_distance: floor_snap_length,
-                target_distance: skin_width,
-                compute_contact_on_penetration: true,
-                ignore_origin_penetration: true,
-            },
-            filter,
-        ) {
-            let slope = SlopePlane::new(
+    // if floor.is_none() && floor_snap_distance > 0.0
+    // if was_on_floor && floor.is_none() {
+    //     if let Some(hit) = spatial.cast_shape(
+    //         &inflated_shape,
+    //         position,
+    //         rotation,
+    //         -up_direction,
+    //         &ShapeCastConfig {
+    //             max_distance: floor_snap_distance + skin_width,
+    //             target_distance: skin_width,
+    //             compute_contact_on_penetration: true,
+    //             ignore_origin_penetration: true,
+    //         },
+    //         filter,
+    //     ) {
+    //         let slope = SlopePlane::new(
+    //             up_direction,
+    //             Dir3::new_unchecked(hit.normal1),
+    //             max_floor_angle,
+    //         );
+    //         if slope.is_floor() {
+    //             if floor_snap_distance > 0.0 && hit.distance <= floor_snap_distance {
+    //                 let incoming = -up_direction * hit.distance;
+    //                 position += incoming;
+    //             }
+
+    //             floor = Some(Floor {
+    //                 entity: hit.entity,
+    //                 normal: Dir3::new_unchecked(hit.normal1),
+    //             });
+    //         }
+    //     }
+    // }
+
+    // 5. Solve remaining overlaps.
+    if should_solve_overlaps {
+        let mut overlaps = SmallVec::<[_; 8]>::new_const();
+        for _ in 0..16 {
+            overlaps.clear();
+            if let Some(motion) = solve_overlaps(
+                &inflated_shape,
+                position,
+                rotation,
                 up_direction,
-                Dir3::new_unchecked(hit.normal1),
                 max_floor_angle,
-            );
-            if slope.is_floor() {
-                let incoming = -up_direction * hit.distance;
-                position += incoming;
+                &mut overlaps,
+                filter,
+                spatial,
+            ) {
+                position += motion;
 
-                floor_entity = Some(hit.entity);
-            }
-        }
-    }
+                for overlap in &overlaps {
+                    if overlap.depth > 1e-4 {
+                        project_motion_on_slope(
+                            floor.is_some(),
+                            &mut slope_index,
+                            overlap.normal,
+                            up_direction,
+                            max_floor_angle,
+                            [&mut velocity],
+                        );
 
-    // 6. Solve remaining overlaps.
-    let mut overlaps = SmallVec::<[_; 8]>::new_const();
-    for _ in 0..16 {
-        overlaps.clear();
-        if let Some(motion) = solve_overlaps(
-            &inflated_shape,
-            position,
-            rotation,
-            up_direction,
-            max_floor_angle,
-            &mut overlaps,
-            filter,
-            spatial,
-        ) {
-            let mut slope_index = SlopeIndex::First;
-            for overlap in &overlaps {
-                if overlap.depth > 1e-4 {
-                    // Do the same trick as with sliding but only for velocity.
-                    match slope_index {
-                        SlopeIndex::First => {
-                            velocity = velocity.reject_from(overlap.normal);
-
-                            slope_index = SlopeIndex::Second {
-                                first_normal: overlap.normal,
-                            };
-                        }
-                        SlopeIndex::Second { first_normal } => {
-                            if overlap.normal.dot(first_normal) < 1.0 - 1e-4 {
-                                let crease = first_normal.cross(overlap.normal).normalize();
-                                velocity = velocity.project_onto(crease);
-
-                                slope_index = SlopeIndex::Third;
-                            }
-                        }
-                        SlopeIndex::Third => {
-                            velocity = Vec3::ZERO;
-                            break;
+                        let slope = Slope::new(up_direction, overlap.normal, max_floor_angle);
+                        if slope.is_floor() {
+                            floor = Some(Floor {
+                                entity: overlap.entity,
+                                normal: overlap.normal,
+                            });
                         }
                     }
                 }
+            } else {
+                break; // No more overlaps.
             }
-            position += motion;
-        } else {
-            break; // No more overlaps.
         }
     }
 
     MovementOutput {
         position,
         velocity,
-        remaining: remaining_motion,
-        slide_distance: 0.0,  // TODO: implement.
-        travel_distance: 0.0, // TODO: implement.
-        floor_entity,
+        remaining_motion,
+        floor,
         is_on_wall,
         is_on_roof,
     }
 }
 
-/// All the info required to solve an overlap with the world.
+#[derive(Debug, Clone, Copy)]
+enum SlopeIndex {
+    First,
+    Second { first_normal: Dir3 },
+    Third,
+}
+
+fn project_motion_on_slope<'a>(
+    is_on_floor: bool,
+    index: &mut SlopeIndex,
+    normal: Dir3,
+    up_direction: Dir3,
+    max_floor_angle: f32,
+    motion_vectors: impl IntoIterator<Item = &'a mut Vec3>,
+) {
+    let new_index = match index {
+        SlopeIndex::First => SlopeIndex::Second {
+            first_normal: normal,
+        },
+        SlopeIndex::Second { first_normal } => {
+            if first_normal.dot(*normal) < 1.0 - 1e-4 {
+                SlopeIndex::Third
+            } else {
+                // If the new normal is identical to the previous one, then we can assume
+                // the motion has already been handled in the previous iteration.
+                return;
+            }
+        }
+        SlopeIndex::Third => SlopeIndex::Third,
+    };
+
+    let slope = Slope::new(up_direction, normal, max_floor_angle);
+
+    for motion in motion_vectors.into_iter() {
+        match index {
+            // We want to remove all motion in the direction of the hit normal,
+            // i.e., project the motion on the normal plane.
+            SlopeIndex::First => {
+                *motion = motion.reject_from_normalized(*normal);
+            }
+            // Since the previous iteration changed the motion direction, doing so again might
+            // result in a new motion where no parts of it existed in the original velocity.
+            // This may result in the character "shaking" when walking into a corner.
+            //
+            // We solve this by projecting onto a "crease" normal instead.
+            SlopeIndex::Second { first_normal } => {
+                let crease = first_normal.cross(*normal).normalize();
+                *motion = motion.project_onto_normalized(crease);
+            }
+            // When the body is sliding on three unique slopes, no more motion is possible.
+            SlopeIndex::Third => *motion = Vec3::ZERO,
+        }
+
+        // Remove vertical motion when the slope is not walkable.
+        if is_on_floor && !slope.is_floor() {
+            *motion -= *up_direction * motion.dot(*up_direction).max(0.0);
+        }
+    }
+
+    *index = new_index;
+}
+
 #[derive(Debug, Clone, Copy)]
 struct OverlapInfo {
-    normal: Vec3,
+    entity: Entity,
+    normal: Dir3,
     depth: f32,
 }
 
@@ -486,7 +543,8 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
             let depth_sq = start.distance_squared(hit.point1);
             if depth_sq > 1e-8 {
                 overlaps.push(OverlapInfo {
-                    normal: hit.normal1,
+                    entity: hit.entity,
+                    normal: Dir3::new_unchecked(hit.normal1),
                     depth: depth_sq.sqrt(),
                 });
             }
@@ -514,15 +572,11 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
         }
 
         // Don't move the body up if the slope is not walkable.
-        let offset_vector = match SlopePlane::new(
-            up_direction,
-            Dir3::new(overlap.normal).unwrap(),
-            max_floor_angle,
-        ) {
-            SlopePlane::Floor => overlap.normal,
+        let offset_vector = match Slope::new(up_direction, overlap.normal, max_floor_angle).plane {
+            SlopePlane::Floor => *overlap.normal,
             SlopePlane::Wall | SlopePlane::Roof => {
-                let up_amount = up_direction.dot(overlap.normal).max(0.0);
-                overlap.normal - up_direction * up_amount
+                let up_amount = up_direction.dot(*overlap.normal).max(0.0);
+                *overlap.normal - up_direction * up_amount
             }
         };
 
@@ -535,7 +589,7 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
                 continue;
             }
             let accounted_for =
-                f32::max(0.0, offset_vector.dot(next_overlap.normal) * overlap.depth);
+                f32::max(0.0, offset_vector.dot(*next_overlap.normal) * overlap.depth);
             next_overlap.depth = f32::max(0.0, next_overlap.depth - accounted_for);
         }
     }
