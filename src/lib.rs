@@ -138,6 +138,8 @@ pub fn collide_and_slide3(
     delta_time: f32,
     gizmos: &mut Gizmos,
 ) -> MovementOutput {
+    let inflated_shape = inflate_shape(shape, skin_width);
+
     let mut remaining_motion = velocity * delta_time;
 
     let mut floor_entity = None;
@@ -155,30 +157,26 @@ pub fn collide_and_slide3(
     let mut slope_index = SlopeIndex::First;
 
     for _ in 0..16 {
-        // 1. Climb walkable slopes.
-        // This is done to avoid losing speed when walking up slopes.
-        //
-        // TODO: this should be possible to disable via an option.
-        let Ok((horizontal_dir, horizontal_len)) =
-            Dir3::new_and_length(remaining_motion.reject_from(*up_direction))
-        else {
-            // FIXME: this should not break the loop,
-            // there may still be vertical motion left.
+        let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
             break;
         };
 
+        // 1. Climb walkable slopes.
+        // This is done to avoid losing speed when walking up slopes and ledges.
+        //
+        // TODO: this should be possible to disable via an option.
         if climb_walkable_slopes {
-            let step_up = up_direction * (max_step_height + skin_width);
-            let step_forward = horizontal_dir * horizontal_len;
+            let step_up = 2.0 * skin_width * up_direction;
+            let step_forward = direction * length;
 
             // Sweep down from the target step location.
             if let Some(hit) = spatial.cast_shape(
-                &inflate_shape(shape, skin_width),
+                &inflated_shape,
                 position + step_up + step_forward,
                 rotation,
                 -up_direction,
                 &ShapeCastConfig {
-                    max_distance: max_step_height + skin_width,
+                    max_distance: skin_width * 2.0,
                     target_distance: skin_width,
                     compute_contact_on_penetration: true,
                     ignore_origin_penetration: true,
@@ -210,10 +208,6 @@ pub fn collide_and_slide3(
                 };
             }
         }
-
-        let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
-            break;
-        };
 
         // 2. Sweep for collisions in movement direction.
         let Some(hit) = spatial.cast_shape(
@@ -297,7 +291,7 @@ pub fn collide_and_slide3(
 
                             // Place body on the ground after stepping.
                             if let Some(hit) = spatial.cast_shape(
-                                &inflate_shape(shape, skin_width),
+                                &inflated_shape,
                                 new_position + up_direction * 1e-4,
                                 rotation,
                                 -up_direction,
@@ -340,18 +334,19 @@ pub fn collide_and_slide3(
                 // This may result in the character "shaking" when walking into a corner.
                 //
                 // We solve this by projecting onto a "crease" normal instead.
-                SlopeIndex::Second { first_normal }
-                    if first_normal.dot(hit.normal1) < 1.0 - 1e-4 =>
-                {
-                    let crease = first_normal.cross(hit.normal1).normalize();
+                SlopeIndex::Second { first_normal } => {
+                    // Do nothing if the normal is identical to the previous one.
+                    if first_normal.dot(hit.normal1) < 1.0 - 1e-4 {
+                        let crease = first_normal.cross(hit.normal1).normalize();
 
-                    remaining_motion = remaining_motion.project_onto(crease);
-                    velocity = velocity.project_onto(crease);
+                        remaining_motion = remaining_motion.project_onto(crease);
+                        velocity = velocity.project_onto(crease);
 
-                    slope_index = SlopeIndex::Third;
+                        slope_index = SlopeIndex::Third;
+                    }
                 }
                 // When the character is sliding on three unique normals, no more motion is possible.
-                _ => {
+                SlopeIndex::Third => {
                     remaining_motion = Vec3::ZERO;
                     velocity = Vec3::ZERO;
                 }
@@ -371,7 +366,7 @@ pub fn collide_and_slide3(
     // correctly, might be worth looking into.
     if floor_entity.is_none() && floor_snap_length > 0.0 {
         if let Some(hit) = spatial.cast_shape(
-            &inflate_shape(shape, skin_width),
+            &inflated_shape,
             position,
             rotation,
             -up_direction,
@@ -397,12 +392,12 @@ pub fn collide_and_slide3(
         }
     }
 
-    // 6. Solve remaining collisions.
-    let mut overlaps = SmallVec::<[_; 4]>::new_const();
-    for _ in 0..12 {
+    // 6. Solve remaining overlaps.
+    let mut overlaps = SmallVec::<[_; 8]>::new_const();
+    for _ in 0..16 {
         overlaps.clear();
         if let Some(motion) = solve_overlaps(
-            &inflate_shape(shape, skin_width),
+            &inflated_shape,
             position,
             rotation,
             up_direction,
@@ -411,7 +406,36 @@ pub fn collide_and_slide3(
             filter,
             spatial,
         ) {
+            let mut slope_index = SlopeIndex::First;
+            for overlap in &overlaps {
+                if overlap.depth > 1e-4 {
+                    // Do the same trick as with sliding but only for velocity.
+                    match slope_index {
+                        SlopeIndex::First => {
+                            velocity = velocity.reject_from(overlap.normal);
+
+                            slope_index = SlopeIndex::Second {
+                                first_normal: overlap.normal,
+                            };
+                        }
+                        SlopeIndex::Second { first_normal } => {
+                            if overlap.normal.dot(first_normal) < 1.0 - 1e-4 {
+                                let crease = first_normal.cross(overlap.normal).normalize();
+                                velocity = velocity.project_onto(crease);
+
+                                slope_index = SlopeIndex::Third;
+                            }
+                        }
+                        SlopeIndex::Third => {
+                            velocity = Vec3::ZERO;
+                            break;
+                        }
+                    }
+                }
+            }
             position += motion;
+        } else {
+            break; // No more overlaps.
         }
     }
 
@@ -460,7 +484,7 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
         |hit| {
             let start = rotation * hit.point2 + position;
             let depth_sq = start.distance_squared(hit.point1);
-            if depth_sq > 1e-6 {
+            if depth_sq > 1e-8 {
                 overlaps.push(OverlapInfo {
                     normal: hit.normal1,
                     depth: depth_sq.sqrt(),
@@ -479,6 +503,8 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
 
     let mut motion = Vec3::ZERO;
 
+    let mut total_depth = 0.0;
+
     // Solve each overlap.
     for i in 0..overlaps.len() {
         let overlap = overlaps[i];
@@ -495,10 +521,12 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
         ) {
             SlopePlane::Floor => overlap.normal,
             SlopePlane::Wall | SlopePlane::Roof => {
-                overlap.normal - *up_direction * up_direction.dot(overlap.normal).max(0.0)
+                let up_amount = up_direction.dot(overlap.normal).max(0.0);
+                overlap.normal - up_direction * up_amount
             }
         };
 
+        total_depth += overlap.depth;
         motion += overlap.depth * offset_vector;
 
         // Make sure the next overlaps doesn't move the character further than neccessary.
@@ -510,6 +538,10 @@ fn solve_overlaps<T: Array<Item = OverlapInfo>>(
                 f32::max(0.0, offset_vector.dot(next_overlap.normal) * overlap.depth);
             next_overlap.depth = f32::max(0.0, next_overlap.depth - accounted_for);
         }
+    }
+
+    if total_depth < 1e-4 {
+        return None;
     }
 
     Some(motion)
