@@ -368,6 +368,8 @@ fn update(
             2.0,
             0.5,
             1.0,
+            true,
+            true,
             shape,
             &filter,
             &spatial,
