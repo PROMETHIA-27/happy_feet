@@ -4,7 +4,7 @@ use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
-    CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, move_character,
+    CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, move_and_slide,
     update_platform_velocity,
 };
 
@@ -359,6 +359,7 @@ fn update(
             let offset = transform.translation - platform_trans.translation;
             let tangental_vel = vel.angular.cross(offset);
             inherited_velocity = vel.linear + tangental_vel;
+            // inherited_velocity = vel.linear;
         } else {
             inherited_velocity = Vec3::ZERO
         }
@@ -369,12 +370,6 @@ fn update(
 
             match mode {
                 MovementMode::Walking => {
-                    if key.just_pressed(KeyCode::Space) {
-                        let jump_vec = Vec3::Y * 15.0;
-                        *vel = vel.reject_from(Vec3::Y) + jump_vec;
-                        jumped = true;
-                    }
-
                     let dir = (transform.rotation * input.buffered.normalize_or_zero())
                         .reject_from(Vec3::Y)
                         .normalize_or_zero();
@@ -382,6 +377,12 @@ fn update(
                     let target_speed = 15.0;
                     let max_acceleration;
                     if floor.is_some() {
+                        if key.just_pressed(KeyCode::Space) {
+                            let jump_vec = Vec3::Y * 15.0;
+                            *vel += jump_vec;
+                            jumped = true;
+                        }
+
                         // Friction
                         let len = vel.length();
                         *vel -=
@@ -420,9 +421,9 @@ fn update(
 
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
 
-        transform.translation += inherited_velocity * time.delta_secs();
+        // transform.translation += inherited_velocity * time.delta_secs();
 
-        let output = move_character(
+        let output = move_and_slide(
             floor.is_some() && !jumped,
             transform.translation,
             velocity.0,
@@ -430,7 +431,7 @@ fn update(
             MovementConfig {
                 up_direction: Dir3::Y,
                 skin_width: SKIN_WIDTH,
-                floor_snap_distance: 1.0,
+                floor_snap_distance: 0.1,
                 max_floor_angle: 45_f32.to_radians(),
             },
             shape,
@@ -438,8 +439,13 @@ fn update(
             &filter,
             time.delta_secs(),
         );
+        transform.translation += inherited_velocity * time.delta_secs();
         transform.translation += output.motion;
         velocity.0 = output.velocity;
+
+        if output.overlap_amount > SKIN_WIDTH {
+            println!("!!! STUCK STUCK STUCK !!!");
+        }
 
         if let Some(new_floor) = output.floor {
             if floor.is_none() && !jumped {

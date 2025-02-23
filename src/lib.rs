@@ -126,6 +126,7 @@ pub struct MovementOutput {
     pub motion: Vec3,
     pub remaining_motion: Vec3,
     pub floor: Option<Floor>,
+    pub overlap_amount: f32,
 }
 
 pub struct MovementConfig {
@@ -136,8 +137,8 @@ pub struct MovementConfig {
 }
 
 // FIXME:
-// - Walking along walls results in sudden changes in speed.
-pub fn move_character(
+// - Walking along walls made up of multiple colliders results in sudden changes in speed.
+pub fn move_and_slide(
     was_on_floor: bool,
     origin: Vec3,
     mut velocity: Vec3,
@@ -158,7 +159,7 @@ pub fn move_character(
     let mut floor = None;
 
     for _ in 0..12 {
-        // Sweep in the movement direction.
+        // 1. Sweep in the movement direction.
         if let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) {
             if let Some(hit) = spatial.cast_shape(
                 shape,
@@ -166,14 +167,14 @@ pub fn move_character(
                 rotation,
                 direction,
                 &ShapeCastConfig {
-                    max_distance: length + config.skin_width,
+                    max_distance: length,
                     target_distance: config.skin_width,
                     compute_contact_on_penetration: true,
                     ignore_origin_penetration: true,
                 },
                 filter,
             ) {
-                let incoming = direction * (hit.distance - config.skin_width); // Tiny offset away from the surface.
+                let incoming = direction * hit.distance;
 
                 // Move as far as possible.
                 motion += incoming;
@@ -196,33 +197,45 @@ pub fn move_character(
             }
         }
 
-        // Solve overlaps vertically.
-        if let Some((_, overlaps)) = solve_overlaps::<4>(
+        // 2. Solve overlaps.
+        //
+        // We want to be able to climb walkable slopes without slowing down,
+        // so we solve those overlaps vertically only.
+        if let Some((_, overlaps)) = get_penetration::<8>(
             &inflated_shape,
             origin + motion,
             rotation,
             -config.up_direction,
             filter,
             spatial,
-            |_| true,
         ) {
-            let mut fixup = Vec3::ZERO;
+            let mut vertical = Vec3::ZERO;
+            let mut horizontal = Vec3::ZERO;
+            let mut rest = Vec3::ZERO;
             for overlap in overlaps {
                 let slope = Slope::new(config.up_direction, overlap.normal, config.max_floor_angle);
                 if slope.is_floor() {
-                    fixup += overlap.normal * overlap.depth;
+                    vertical += overlap.normal * overlap.depth;
                     floor = Some(Floor {
                         entity: overlap.entity,
                         normal: overlap.normal,
                     });
                 } else {
+                    if was_on_floor {
+                        horizontal += overlap.normal * overlap.depth;
+                    } else {
+                        rest += overlap.normal * overlap.depth;
+                    }
                     project_motion(was_on_floor, &mut index, slope, [
                         &mut remaining_motion,
                         &mut velocity,
                     ]);
                 }
             }
-            motion += fixup.project_onto_normalized(*config.up_direction);
+            motion += vertical.project_onto_normalized(*config.up_direction);
+            motion +=
+                horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
+            motion += rest;
         }
 
         if remaining_motion.length_squared() < 1e-4 {
@@ -230,42 +243,43 @@ pub fn move_character(
         }
     }
 
-    // Solve remaining overlaps.
-    for _ in 0..6 {
-        if let Some((fixup, overlaps)) = solve_overlaps::<8>(
+    // 3. Solve remaining overlaps.
+    //
+    // This is strictly speaking not neccessary but it slightly decreases
+    // "shaking" when walking into walls.
+    let mut overlap_amount = 0.0;
+    for _ in 0..4 {
+        overlap_amount = 0.0;
+        if let Some((_fixup, overlaps)) = get_penetration::<8>(
             &inflated_shape,
             origin + motion,
             rotation,
             -config.up_direction,
             filter,
             spatial,
-            |_| true,
         ) {
-            // Don't push character up when grounded.
-            if was_on_floor {
-                motion += fixup - config.up_direction.dot(fixup).max(0.0) * config.up_direction;
-            } else {
-                motion += fixup;
-            }
-
-            // Handle slopes.
+            let mut horizontal = Vec3::ZERO;
+            let mut rest = Vec3::ZERO;
             for overlap in overlaps {
+                overlap_amount += overlap.depth;
                 let slope = Slope::new(config.up_direction, overlap.normal, config.max_floor_angle);
-                if slope.is_floor() {
-                    floor = Some(Floor {
-                        entity: overlap.entity,
-                        normal: overlap.normal,
-                    });
+                if was_on_floor && !slope.is_floor() {
+                    horizontal += overlap.normal * overlap.depth;
                 } else {
-                    project_motion(was_on_floor, &mut index, slope, [&mut velocity]);
+                    rest += overlap.normal * overlap.depth;
                 }
             }
+            motion +=
+                horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
+            motion += rest;
         } else {
+            overlap_amount = 0.0;
+
             break;
         }
     }
 
-    // Detect floor state.
+    // Detect and snap to floor.
     //
     // FIXME: snaps to floor after jumping
     if was_on_floor && floor.is_none() {
@@ -275,14 +289,16 @@ pub fn move_character(
             rotation,
             -config.up_direction,
             &ShapeCastConfig {
-                max_distance: config.floor_snap_distance,
+                max_distance: config.floor_snap_distance + 0.01,
                 target_distance: 0.0,
                 compute_contact_on_penetration: true,
                 ignore_origin_penetration: true,
             },
             filter,
             |hit| {
-                motion -= config.up_direction * hit.distance;
+                if hit.distance <= config.floor_snap_distance {
+                    motion -= config.up_direction * hit.distance;
+                }
                 let slope = Slope::new(
                     config.up_direction,
                     Dir3::new_unchecked(hit.normal1),
@@ -304,6 +320,7 @@ pub fn move_character(
         motion,
         remaining_motion,
         floor,
+        overlap_amount,
     }
 }
 
@@ -373,20 +390,19 @@ struct OverlapInfo {
 }
 
 #[must_use]
-fn solve_overlaps<const MAX_OVERLAPS: usize>(
-    inflated_shape: &Collider,
+fn get_penetration<const MAX_OVERLAPS: usize>(
+    shape: &Collider,
     position: Vec3,
     rotation: Quat,
     direction: Dir3,
     filter: &SpatialQueryFilter,
     spatial: &SpatialQuery,
-    mut f: impl FnMut(&OverlapInfo) -> bool,
 ) -> Option<(Vec3, SmallVec<[OverlapInfo; MAX_OVERLAPS]>)> {
     let mut overlaps = SmallVec::<[OverlapInfo; MAX_OVERLAPS]>::new_const();
 
     // Find all overlapping bodies.
     spatial.shape_hits_callback(
-        &inflated_shape,
+        &shape,
         position,
         rotation,
         direction,
@@ -405,7 +421,7 @@ fn solve_overlaps<const MAX_OVERLAPS: usize>(
                 normal: Dir3::new_unchecked(hit.normal1),
                 depth: depth_sq.sqrt(),
             };
-            if depth_sq > 1e-8 && f(&overlap) {
+            if depth_sq > 1e-8 {
                 overlaps.push(overlap);
             }
             overlaps.capacity() > overlaps.len()
@@ -420,18 +436,14 @@ fn solve_overlaps<const MAX_OVERLAPS: usize>(
     overlaps.sort_by(|a, b| b.depth.total_cmp(&a.depth));
 
     let mut fixup = Vec3::ZERO;
+    let mut total_depth = 0.0;
 
     // Solve each overlap.
-    let mut i = 0;
-    while i < overlaps.len() {
+    for i in 0..overlaps.len() {
         let overlap = overlaps[i];
 
-        if overlap.depth < 1e-4 {
-            overlaps.swap_remove(i); // Remove overlap if depth is nearly 0.
-            continue;
-        }
-
         fixup += overlap.depth * overlap.normal; // Accumulate fixup.
+        total_depth += overlap.depth;
 
         // Make sure the next overlaps doesn't move the character further than neccessary.
         for next_overlap in &mut overlaps[i + 1..] {
@@ -444,11 +456,9 @@ fn solve_overlaps<const MAX_OVERLAPS: usize>(
             );
             next_overlap.depth = f32::max(0.0, next_overlap.depth - accounted_for);
         }
-
-        i += 1;
     }
 
-    if overlaps.is_empty() {
+    if total_depth < 1e-4 {
         return None;
     }
 
