@@ -302,6 +302,8 @@ fn input(
         KeyCode::KeyW..KeyCode::KeyS,
     );
 
+    let pressed_jump = key.just_pressed(KeyCode::Space);
+
     let change_mode = key.just_pressed(KeyCode::Tab);
 
     for (mut transform, mut movement, mut mode) in &mut query {
@@ -313,7 +315,11 @@ fn input(
         }
 
         if let MovementMode::Walking = *mode {
-            input.y = 0.0;
+            if pressed_jump {
+                input.y = 1.0;
+            } else {
+                input.y = 0.0;
+            }
         }
         movement.set(input);
 
@@ -322,6 +328,9 @@ fn input(
         transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
     }
 }
+
+#[derive(Component)]
+struct WallNormal(Vec3);
 
 fn update(
     mut commands: Commands,
@@ -338,6 +347,7 @@ fn update(
             &MovementInput,
             &MovementMode,
             Option<&Floor>,
+            Option<&WallNormal>,
         ),
         With<Player>,
     >,
@@ -353,7 +363,7 @@ fn update(
         *noclip_enabled = !*noclip_enabled;
     }
 
-    for (entity, shape, mut transform, mut velocity, input, mode, floor) in &mut query {
+    for (entity, shape, mut transform, mut velocity, input, mode, floor, wall) in &mut query {
         let inherited_velocity;
         if let Some((vel, platform_trans)) = floor.and_then(|p| platforms.get(p.entity).ok()) {
             let offset = transform.translation - platform_trans.translation;
@@ -364,25 +374,38 @@ fn update(
             inherited_velocity = Vec3::ZERO
         }
 
-        let mut jumped = false;
+        let mut did_jump = false;
         {
             let vel = &mut velocity.0;
 
             match mode {
                 MovementMode::Walking => {
-                    let dir = (transform.rotation * input.buffered.normalize_or_zero())
+                    let movement_input = Vec3::new(input.buffered.x, 0.0, input.buffered.z);
+                    let jump_input = input.buffered.y > 0.0;
+                    let dir = (transform.rotation * movement_input.clamp_length_max(1.0))
                         .reject_from(Vec3::Y)
-                        .normalize_or_zero();
+                        .clamp_length_max(1.0);
 
                     let target_speed = 15.0;
+                    let gravity = 20.0;
                     let max_acceleration;
-                    if floor.is_some() {
-                        if key.just_pressed(KeyCode::Space) {
-                            let jump_vec = Vec3::Y * 15.0;
-                            *vel += jump_vec;
-                            jumped = true;
-                        }
 
+                    let jump_dir = match wall {
+                        Some(wall) if floor.is_none() => Some(wall.0),
+                        _ if floor.is_some() => Some(Vec3::Y),
+                        _ => None,
+                    };
+
+                    if let Some(dir) = jump_dir {
+                        if jump_input {
+                            let jump_height = 4.0;
+                            let jump_accel = f32::sqrt(2.0 * gravity * jump_height);
+                            *vel += dir * jump_accel;
+                            did_jump = true;
+                        }
+                    }
+
+                    if floor.is_some() {
                         // Friction
                         let len = vel.length();
                         *vel -=
@@ -391,7 +414,7 @@ fn update(
                         max_acceleration = 200.0;
                     } else {
                         max_acceleration = 50.0;
-                        *vel -= Vec3::Y * time.delta_secs() * 20.0; // Gravity
+                        *vel -= Vec3::Y * time.delta_secs() * gravity; // Gravity
                     }
 
                     if let Ok(dir) = Dir3::new(dir) {
@@ -421,23 +444,28 @@ fn update(
 
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
 
-        // transform.translation += inherited_velocity * time.delta_secs();
-
+        let mut wall = None;
         let output = move_and_slide(
-            floor.is_some() && !jumped,
+            floor.is_some() && !did_jump,
             transform.translation,
             velocity.0,
             transform.rotation,
             MovementConfig {
                 up_direction: Dir3::Y,
                 skin_width: SKIN_WIDTH,
-                floor_snap_distance: 0.1,
+                floor_snap_distance: 0.0,
                 max_floor_angle: 45_f32.to_radians(),
             },
             shape,
             &spatial,
             &filter,
             time.delta_secs(),
+            |slope| {
+                if !slope.is_floor() {
+                    wall = Some(*slope.normal)
+                }
+            },
+            &mut gizmos,
         );
         transform.translation += inherited_velocity * time.delta_secs();
         transform.translation += output.motion;
@@ -447,8 +475,14 @@ fn update(
             println!("!!! STUCK STUCK STUCK !!!");
         }
 
+        if let Some(wall) = wall {
+            commands.entity(entity).insert(WallNormal(wall));
+        } else {
+            commands.entity(entity).remove::<WallNormal>();
+        }
+
         if let Some(new_floor) = output.floor {
-            if floor.is_none() && !jumped {
+            if floor.is_none() && !did_jump {
                 println!("ON FLOOR");
                 commands.entity(entity).insert(new_floor);
             }

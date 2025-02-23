@@ -68,22 +68,22 @@ pub fn update_platform_velocity(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum SlopePlane {
+pub enum SlopePlane {
     Floor,
     Wall,
     Roof,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Slope {
-    up: Dir3,
-    normal: Dir3,
-    angle: f32,
-    plane: SlopePlane,
+pub struct Slope {
+    pub up: Dir3,
+    pub normal: Dir3,
+    pub angle: f32,
+    pub plane: SlopePlane,
 }
 
 impl Slope {
-    fn new(up: Dir3, normal: Dir3, max_floor_angle: f32) -> Self {
+    pub fn new(up: Dir3, normal: Dir3, max_floor_angle: f32) -> Self {
         let angle = f32::acos(normal.dot(*up));
 
         if angle > PI / 2.0 {
@@ -110,7 +110,7 @@ impl Slope {
         }
     }
 
-    fn is_floor(&self) -> bool {
+    pub fn is_floor(&self) -> bool {
         matches!(self.plane, SlopePlane::Floor)
     }
 }
@@ -137,7 +137,9 @@ pub struct MovementConfig {
 }
 
 // FIXME:
-// - Walking along walls made up of multiple colliders results in sudden changes in speed.
+// - Walking along walls made up of multiple colliders results in sudden changes in speed
+// and generally feels "off". I don't know how other engines solves this (if they do).
+// - Jumping doesn't work when walking into wall.
 pub fn move_and_slide(
     was_on_floor: bool,
     origin: Vec3,
@@ -148,6 +150,8 @@ pub fn move_and_slide(
     spatial: &SpatialQuery,
     filter: &SpatialQueryFilter,
     delta_secs: f32,
+    mut on_collide: impl FnMut(Slope),
+    gizmos: &mut Gizmos,
 ) -> MovementOutput {
     let mut motion = Vec3::ZERO;
     let mut remaining_motion = velocity * delta_secs;
@@ -167,14 +171,14 @@ pub fn move_and_slide(
                 rotation,
                 direction,
                 &ShapeCastConfig {
-                    max_distance: length,
+                    max_distance: length + config.skin_width,
                     target_distance: config.skin_width,
                     compute_contact_on_penetration: true,
                     ignore_origin_penetration: true,
                 },
                 filter,
             ) {
-                let incoming = direction * hit.distance;
+                let incoming = direction * (hit.distance - config.skin_width);
 
                 // Move as far as possible.
                 motion += incoming;
@@ -190,14 +194,21 @@ pub fn move_and_slide(
                     floor = Some(Floor {
                         entity: hit.entity,
                         normal: slope.normal,
-                    });
+                    })
+                } else {
+                    project_motion(was_on_floor, &mut index, slope, [
+                        &mut remaining_motion,
+                        &mut velocity,
+                    ]);
                 }
+
+                on_collide(slope);
             } else {
                 motion += mem::take(&mut remaining_motion);
             }
         }
 
-        // 2. Solve overlaps.
+        // 3. Solve overlaps.
         //
         // We want to be able to climb walkable slopes without slowing down,
         // so we solve those overlaps vertically only.
@@ -205,33 +216,31 @@ pub fn move_and_slide(
             &inflated_shape,
             origin + motion,
             rotation,
-            -config.up_direction,
+            Dir3::new(motion).unwrap_or(-config.up_direction),
             filter,
             spatial,
         ) {
             let mut vertical = Vec3::ZERO;
             let mut horizontal = Vec3::ZERO;
             let mut rest = Vec3::ZERO;
-            for overlap in overlaps {
+
+            for overlap in &overlaps {
                 let slope = Slope::new(config.up_direction, overlap.normal, config.max_floor_angle);
+                on_collide(slope); // FIXME: this can be called many times on the same wall. 
+
                 if slope.is_floor() {
                     vertical += overlap.normal * overlap.depth;
                     floor = Some(Floor {
                         entity: overlap.entity,
                         normal: overlap.normal,
                     });
+                } else if was_on_floor {
+                    horizontal += overlap.normal * overlap.depth;
                 } else {
-                    if was_on_floor {
-                        horizontal += overlap.normal * overlap.depth;
-                    } else {
-                        rest += overlap.normal * overlap.depth;
-                    }
-                    project_motion(was_on_floor, &mut index, slope, [
-                        &mut remaining_motion,
-                        &mut velocity,
-                    ]);
+                    rest += overlap.normal * overlap.depth;
                 }
             }
+
             motion += vertical.project_onto_normalized(*config.up_direction);
             motion +=
                 horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
@@ -243,11 +252,11 @@ pub fn move_and_slide(
         }
     }
 
-    // 3. Solve remaining overlaps.
+    // 4. Solve remaining overlaps.
     //
-    // This is strictly speaking not neccessary but it slightly decreases
-    // "shaking" when walking into walls.
+    // This reduces jitter when walking into walls.
     let mut overlap_amount = 0.0;
+
     for _ in 0..4 {
         overlap_amount = 0.0;
         if let Some((_fixup, overlaps)) = get_penetration::<8>(
@@ -258,17 +267,26 @@ pub fn move_and_slide(
             filter,
             spatial,
         ) {
+            let mut vertical = Vec3::ZERO;
             let mut horizontal = Vec3::ZERO;
             let mut rest = Vec3::ZERO;
+
             for overlap in overlaps {
                 overlap_amount += overlap.depth;
+
                 let slope = Slope::new(config.up_direction, overlap.normal, config.max_floor_angle);
-                if was_on_floor && !slope.is_floor() {
+                on_collide(slope);
+
+                if slope.is_floor() {
+                    vertical += overlap.normal * overlap.depth;
+                } else if was_on_floor {
                     horizontal += overlap.normal * overlap.depth;
                 } else {
                     rest += overlap.normal * overlap.depth;
                 }
             }
+
+            motion += vertical.project_onto_normalized(*config.up_direction);
             motion +=
                 horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
             motion += rest;
@@ -279,9 +297,7 @@ pub fn move_and_slide(
         }
     }
 
-    // Detect and snap to floor.
-    //
-    // FIXME: snaps to floor after jumping
+    // 5. Detect and snap to floor.
     if was_on_floor && floor.is_none() {
         spatial.shape_hits_callback(
             &inflated_shape,
@@ -387,6 +403,9 @@ struct OverlapInfo {
     entity: Entity,
     normal: Dir3,
     depth: f32,
+    start: Vec3,
+    point: Vec3,
+    hit: ShapeHitData,
 }
 
 #[must_use]
@@ -420,6 +439,9 @@ fn get_penetration<const MAX_OVERLAPS: usize>(
                 entity: hit.entity,
                 normal: Dir3::new_unchecked(hit.normal1),
                 depth: depth_sq.sqrt(),
+                start,
+                point: hit.point1,
+                hit: hit,
             };
             if depth_sq > 1e-8 {
                 overlaps.push(overlap);
