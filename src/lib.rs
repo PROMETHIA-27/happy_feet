@@ -134,12 +134,18 @@ pub struct MovementConfig {
     pub skin_width: f32,
     pub floor_snap_distance: f32,
     pub max_floor_angle: f32,
+    pub allow_sliding_up_walls: bool,
 }
 
 // FIXME:
 // - Walking along walls made up of multiple colliders results in sudden changes in speed
 // and generally feels "off". I don't know how other engines solves this (if they do).
-// - Jumping doesn't work when walking into wall.
+// - Jumping doesn't work when walking up steep slopes.
+//
+// TODO:
+// - More configuration options.
+// - Stair stepping.
+// - Moving platforms (properly).
 pub fn move_and_slide(
     was_on_floor: bool,
     origin: Vec3,
@@ -162,7 +168,7 @@ pub fn move_and_slide(
 
     let mut floor = None;
 
-    for _ in 0..12 {
+    for _ in 0..16 {
         // 1. Sweep in the movement direction.
         if let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) {
             if let Some(hit) = spatial.cast_shape(
@@ -180,7 +186,7 @@ pub fn move_and_slide(
             ) {
                 let incoming = direction * (hit.distance - config.skin_width);
 
-                // Move as far as possible.
+                // Move as close as possible.
                 motion += incoming;
                 remaining_motion -= incoming;
 
@@ -196,10 +202,13 @@ pub fn move_and_slide(
                         normal: slope.normal,
                     })
                 } else {
-                    project_motion(was_on_floor, &mut index, slope, [
-                        &mut remaining_motion,
-                        &mut velocity,
-                    ]);
+                    project_motion(
+                        was_on_floor,
+                        &mut index,
+                        slope,
+                        config.allow_sliding_up_walls,
+                        [&mut remaining_motion, &mut velocity],
+                    );
                 }
 
                 on_collide(slope);
@@ -221,7 +230,7 @@ pub fn move_and_slide(
             spatial,
         ) {
             let mut vertical = Vec3::ZERO;
-            let mut horizontal = Vec3::ZERO;
+            let mut up = Vec3::ZERO;
             let mut rest = Vec3::ZERO;
 
             for overlap in &overlaps {
@@ -234,16 +243,15 @@ pub fn move_and_slide(
                         entity: overlap.entity,
                         normal: overlap.normal,
                     });
-                } else if was_on_floor {
-                    horizontal += overlap.normal * overlap.depth;
-                } else {
+                } else if config.allow_sliding_up_walls && !was_on_floor {
                     rest += overlap.normal * overlap.depth;
+                } else {
+                    up += overlap.normal * overlap.depth;
                 }
             }
 
             motion += vertical.project_onto_normalized(*config.up_direction);
-            motion +=
-                horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
+            motion += up - config.up_direction.dot(up).max(0.0) * config.up_direction;
             motion += rest;
         }
 
@@ -268,7 +276,7 @@ pub fn move_and_slide(
             spatial,
         ) {
             let mut vertical = Vec3::ZERO;
-            let mut horizontal = Vec3::ZERO;
+            let mut up = Vec3::ZERO;
             let mut rest = Vec3::ZERO;
 
             for overlap in overlaps {
@@ -280,15 +288,14 @@ pub fn move_and_slide(
                 if slope.is_floor() {
                     vertical += overlap.normal * overlap.depth;
                 } else if was_on_floor {
-                    horizontal += overlap.normal * overlap.depth;
+                    up += overlap.normal * overlap.depth;
                 } else {
                     rest += overlap.normal * overlap.depth;
                 }
             }
 
             motion += vertical.project_onto_normalized(*config.up_direction);
-            motion +=
-                horizontal - config.up_direction.dot(horizontal).max(0.0) * config.up_direction;
+            motion += up - config.up_direction.dot(up).max(0.0) * config.up_direction;
             motion += rest;
         } else {
             overlap_amount = 0.0;
@@ -351,6 +358,7 @@ fn project_motion<'a>(
     was_on_floor: bool,
     index: &mut SlopeIndex,
     slope: Slope,
+    allow_sliding_up_walls: bool,
     motion_vectors: impl IntoIterator<Item = &'a mut Vec3>,
 ) {
     let new_index = match index {
@@ -390,7 +398,7 @@ fn project_motion<'a>(
         }
 
         // Remove vertical motion when the slope is not walkable.
-        if was_on_floor && !slope.is_floor() {
+        if (was_on_floor || !allow_sliding_up_walls) && !slope.is_floor() {
             *motion -= *slope.up * motion.dot(*slope.up).max(0.0);
         }
     }

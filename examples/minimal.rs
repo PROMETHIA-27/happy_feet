@@ -82,7 +82,11 @@ fn setup_player(
             MovementInput::default(),
             MovementMode::Flying,
             CharacterVelocity(Vec3::ZERO),
-            RigidBody::Kinematic,
+            (
+                RigidBody::Kinematic,
+                GravityScale(0.0),
+                LockedAxes::ROTATION_LOCKED,
+            ),
             Collider::capsule(1.0, 2.0),
             Transform {
                 translation: Vec3::Y * 10.0,
@@ -344,6 +348,7 @@ fn update(
             &Collider,
             &mut Transform,
             &mut CharacterVelocity,
+            // &mut LinearVelocity,
             &MovementInput,
             &MovementMode,
             Option<&Floor>,
@@ -453,8 +458,9 @@ fn update(
             MovementConfig {
                 up_direction: Dir3::Y,
                 skin_width: SKIN_WIDTH,
-                floor_snap_distance: 0.0,
+                floor_snap_distance: 0.25,
                 max_floor_angle: 45_f32.to_radians(),
+                allow_sliding_up_walls: true,
             },
             shape,
             &spatial,
@@ -470,6 +476,8 @@ fn update(
         transform.translation += inherited_velocity * time.delta_secs();
         transform.translation += output.motion;
         velocity.0 = output.velocity;
+
+        // dbg!(velocity.0.length());
 
         if output.overlap_amount > SKIN_WIDTH {
             println!("!!! STUCK STUCK STUCK !!!");
