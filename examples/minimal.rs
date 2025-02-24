@@ -5,7 +5,7 @@ use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
     CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, SlopePlane,
-    move_and_slide, project_vector_on_floor, update_platform_velocity,
+    move_and_slide, project_on_floor, update_platform_velocity,
 };
 
 fn main() -> AppExit {
@@ -101,14 +101,20 @@ fn setup_player(
                 CollisionLayers::NONE,
             ));
             player
-                .spawn((CameraPole, Transform {
-                    translation: Vec3::Y * 2.0,
-                    ..Default::default()
-                }))
-                .with_child((Camera3d::default(), Transform {
-                    translation: Vec3::Z * 20.0,
-                    ..Default::default()
-                }));
+                .spawn((
+                    CameraPole,
+                    Transform {
+                        translation: Vec3::Y * 2.0,
+                        ..Default::default()
+                    },
+                ))
+                .with_child((
+                    Camera3d::default(),
+                    Transform {
+                        translation: Vec3::Z * 20.0,
+                        ..Default::default()
+                    },
+                ));
         });
 }
 
@@ -424,7 +430,7 @@ fn update(
                         );
 
                         if let Some(floor) = floor {
-                            *vel += project_vector_on_floor(accel, floor.normal, Dir3::Y, true);
+                            *vel += project_on_floor(accel, floor.normal, Dir3::Y, true);
                         } else {
                             *vel += accel;
                         }

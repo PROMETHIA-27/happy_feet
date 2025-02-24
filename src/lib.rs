@@ -316,7 +316,7 @@ pub fn move_and_slide(
             });
 
             // Slide on floor.
-            remaining_motion = project_vector_on_floor(
+            remaining_motion = project_on_floor(
                 remaining_motion,
                 normal,
                 config.up_direction,
@@ -358,7 +358,7 @@ pub fn move_and_slide(
                     },
                 );
 
-                remaining_motion = project_vector_on_floor(
+                remaining_motion = project_on_floor(
                     remaining_motion,
                     normal,
                     config.up_direction,
@@ -366,13 +366,13 @@ pub fn move_and_slide(
                 );
             } else {
                 // Slide on walls.
-                remaining_motion = project_vector_on_wall(
+                remaining_motion = project_on_wall(
                     remaining_motion,
                     normal,
                     config.up_direction,
                     config.allow_sliding_up_walls,
                 );
-                velocity = project_vector_on_wall(
+                velocity = project_on_wall(
                     velocity,
                     normal,
                     config.up_direction,
@@ -427,7 +427,7 @@ pub fn move_and_slide(
                         horizontal_fix += overlap.penetration();
                     }
                     SlopePlane::Wall => {
-                        velocity = project_vector_on_wall(
+                        velocity = project_on_wall(
                             velocity,
                             normal,
                             config.up_direction,
@@ -507,7 +507,7 @@ pub fn move_and_slide(
 /// If `allow_sliding_up` is `false`, the horizontal part of `vector` (relative to `up_direction`)
 /// will not contribute to the positive vertical part of the resulting vector.
 #[must_use]
-pub fn project_vector_on_wall(
+pub fn project_on_wall(
     vector: Vec3,
     normal: Dir3,
     up_direction: Dir3,
@@ -535,7 +535,7 @@ pub fn project_vector_on_wall(
 ///
 /// When `preserve_speed` is `true` the magnitude of `vector` will remain the same regardless of the slope angle.
 #[must_use]
-pub fn project_vector_on_floor(
+pub fn project_on_floor(
     vector: Vec3,
     normal: Dir3,
     up_direction: Dir3,
