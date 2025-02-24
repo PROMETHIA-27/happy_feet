@@ -1,6 +1,6 @@
 🐉 HERE BE DRAGONS 🐉
 
-`slither` privides tools for implementing character movement in the [bevy] game engine, using [avian] for physics.
+`slither` privides tools for implementing character movement in the [bevy] game engine, using [avian3d] for physics.
 The main function is `move_and_slide` which, you guessed it, moves and slides the character along the world geometry.
 
 ```rust
@@ -17,7 +17,7 @@ without skewing it down the slope.
 It basically allows you to walk up slopes without subtly changing the movement direction, which is anoying.
 
 ```rust
-let accel = acceleration(velocity, input_direction, ..etc); // Simple quake style acceleration, not part of the library.
+let accel = acceleration(velocity, input_direction, ..etc);
 velocity += project_on_floor(accel, floor.normal, ..etc);
 ```
 
@@ -29,6 +29,7 @@ Feel free to check out the [example](examples/minimal.rs) once I've cleaned it u
 
 - [ ] stair stepping
 - [ ] platform velocity
+- [ ] 2d support
 - [ ] improve stability when sliding on complext geometry
 
 ### Todo (later):
@@ -37,3 +38,4 @@ Feel free to check out the [example](examples/minimal.rs) once I've cleaned it u
 
 [bevy]: https://github.com/bevyengine/bevy
 [avian]: https://github.com/Jondolf/avian
+[avian3d]: https://github.com/Jondolf/avian
