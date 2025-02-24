@@ -17,7 +17,7 @@ without skewing it down the slope.
 It basically allows you to walk up slopes without subtly changing the movement direction, which is anoying.
 
 ```rust
-let accel = acceleration(velocity, input_direction, ..etc); // Simple quake style acceleration, not part of the library.
+let accel = acceleration(velocity, input_direction, ..etc);
 velocity += project_on_floor(accel, floor.normal, ..etc);
 ```
 
