@@ -1,6 +1,6 @@
 🐉 HERE BE DRAGONS 🐉
 
-`slither` privides tools for implementing character movement in the bevy engine, using avian3d for physics.
+`slither` privides tools for implementing character movement in the [bevy] game engine, using [avian] for physics.
 The main function is `move_and_slide` which, you guessed it, moves and slides the character along the world geometry.
 
 ```rust
@@ -24,3 +24,16 @@ velocity += project_on_floor(accel, floor.normal, ..etc);
 That's it! 
 
 Feel free to check out the [example](examples/minimal.rs) once I've cleaned it up.
+
+### Todo (now):
+
+- [ ] stair stepping
+- [ ] platform velocity
+- [ ] improve stability when sliding on complext geometry
+
+### Todo (later):
+- [ ] lil platformer demo to test if it works for actual games
+- [ ] merge into [avian] inshallah 
+
+[bevy]: https://github.com/bevyengine/bevy
+[avian]: https://github.com/Jondolf/avian
