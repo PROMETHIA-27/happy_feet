@@ -28,7 +28,10 @@ fn main() -> AppExit {
                 setup_platforms,
             ),
         )
-        .add_systems(Update, update_input)
+        .add_systems(
+            Update,
+            (update_input, update_follow_camera, update_player_rotation),
+        )
         .add_systems(
             FixedUpdate,
             (
@@ -75,17 +78,35 @@ enum MovementMode {
     Flying,
 }
 
+#[derive(Component, Default, Clone, Copy)]
+struct EulerRotation {
+    pitch: f32,
+    yaw: f32,
+    roll: f32,
+}
+
+#[derive(Component)]
+struct FollowTarget {
+    target: Entity,
+    // target_position: Vec3,
+    // target_rotation: Quat,
+    target_distance: f32,
+    target_angle: f32,
+    speed: f32,
+}
+
 fn setup_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands
+    let player = commands
         .spawn((
             Player,
             Character {
                 skin_width: SKIN_WIDTH,
                 climb_up_walls: false,
+                floor_snap_distance: 0.0,
                 ..Default::default()
             },
             MovementInput::default(),
@@ -101,34 +122,102 @@ fn setup_player(
                 translation: Vec3::Y * 10.0,
                 ..Default::default()
             },
-            // Mesh3d(meshes.add(Capsule3d::new(1.0, 2.0))),
-            // MeshMaterial3d(materials.add(StandardMaterial::default())),
+            Mesh3d(meshes.add(Capsule3d::new(1.0, 2.0))),
+            MeshMaterial3d(materials.add(StandardMaterial::default())),
         ))
         .with_children(|player| {
             player.spawn((
                 Collider::capsule(1.0 + SKIN_WIDTH, 2.0),
                 CollisionLayers::NONE,
             ));
-            player
-                .spawn((
-                    CameraArm,
-                    Transform {
-                        translation: Vec3::Y * 2.0,
-                        ..Default::default()
-                    },
-                ))
-                .with_child((
-                    Camera3d::default(),
-                    Projection::Perspective(PerspectiveProjection {
-                        fov: 80_f32.to_radians(),
-                        ..Default::default()
-                    }),
-                    Transform {
-                        translation: Vec3::Z * 10.0, // Camera distance.
-                        ..Default::default()
-                    },
-                ));
-        });
+        })
+        .id();
+
+    commands
+        .spawn((
+            // CameraArm,
+            EulerRotation::default(),
+            FollowTarget {
+                target: player,
+                target_distance: 1.0,
+                target_angle: 60_f32.to_radians(),
+                speed: 4.0,
+            },
+            Transform {
+                translation: Vec3::Y * 2.0,
+                ..Default::default()
+            },
+        ))
+        .with_child((
+            Camera3d::default(),
+            Projection::Perspective(PerspectiveProjection {
+                fov: 80_f32.to_radians(),
+                ..Default::default()
+            }),
+            Transform {
+                translation: Vec3::new(0.0, 3.0, 10.0), // Camera distance.
+                ..Default::default()
+            },
+        ));
+}
+
+fn update_follow_camera(
+    mut followers: Query<(&mut Transform, &mut FollowTarget)>,
+    targets: Query<&Transform, Without<FollowTarget>>,
+    time: Res<Time>,
+) {
+    for (mut transform1, mut follow) in &mut followers {
+        let Ok(transform2) = targets.get(follow.target) else {
+            continue;
+        };
+
+        let delta = transform2.translation - transform1.translation;
+
+        let Ok((direction, distance)) = Dir3::new_and_length(delta) else {
+            continue;
+        };
+
+        if distance > follow.target_distance {
+            let excess = follow.target_distance - distance;
+            transform1.translation -= excess * follow.speed * time.delta_secs() * direction;
+        }
+
+        let target = transform1.translation.reject_from_normalized(Vec3::Y)
+            + transform2.translation.project_onto_normalized(Vec3::Y);
+
+        transform1
+            .translation
+            .smooth_nudge(&target, follow.speed, time.delta_secs());
+    }
+}
+
+fn update_player_rotation(
+    followers: Query<(&Transform, &FollowTarget)>,
+    mut targets: Query<&mut Transform, Without<FollowTarget>>,
+) {
+    for (transform1, follow) in &followers {
+        let Ok(mut transform2) = targets.get_mut(follow.target) else {
+            continue;
+        };
+
+        // transform2.aligned_by(main_axis, main_direction, secondary_axis, secondary_direction)
+
+        let delta = transform2.translation.reject_from_normalized(Vec3::Y)
+            - transform1.translation.reject_from_normalized(Vec3::Y);
+
+        let Ok(direction) = Dir3::new(delta) else {
+            continue;
+        };
+
+        // let angle = transform1.right().angle_between(Vec3::X) * PI;
+
+        // let direction = transform1
+        //     .forward()
+        //     .reject_from_normalized(Vec3::Y)
+        //     .normalize();
+
+        // transform2.look_to(direction, Vec3::Y);
+    }
 }
 
 fn setup_slopes(
@@ -311,7 +400,8 @@ fn update_input(
     key: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut players: Query<(&mut Transform, &mut MovementInput, &mut MovementMode), With<Player>>,
-    mut cameras: Query<&mut Transform, (With<CameraArm>, Without<Player>)>,
+    mut cameras: Query<(&mut Transform, &mut EulerRotation, &FollowTarget), Without<Player>>,
+    time: Res<Time>,
 ) {
     if !mouse.pressed(MouseButton::Left) {
         motion.clear();
@@ -352,13 +442,25 @@ fn update_input(
 
         // let right = transform.right();
         // transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
-        transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
+        // transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
     }
 
-    for mut transform in &mut cameras {
-        let right = transform.right();
-        transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
-        // transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
+    for (mut follow_transform, mut rotation, follow) in &mut cameras {
+        rotation.pitch += mouse_delta.y * -0.01;
+        rotation.yaw += mouse_delta.x * -0.01;
+
+        let EulerRotation { pitch, yaw, roll } = *rotation;
+
+        follow_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
+
+        let (mut player_transform, ..) = players.get_mut(follow.target).unwrap();
+        player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, 0.0, 0.0);
+
+        follow_transform.translation.smooth_nudge(
+            &player_transform.translation,
+            mouse_delta.x.abs() + mouse_delta.y.abs(),
+            time.delta_secs(),
+        );
     }
 }
 
