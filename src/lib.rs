@@ -3,7 +3,6 @@ use bevy::{
     ecs::{component::ComponentId, world::DeferredWorld},
     prelude::*,
 };
-use smallvec::SmallVec;
 use std::mem;
 
 // TODO: components and systems for character.
@@ -24,41 +23,27 @@ impl Plugin for CharacterMovementPlugin {
     }
 }
 
-#[derive(Component, Reflect, PartialEq)]
-pub struct Character {
-    pub up_direction: Dir3,
-    pub skin_width: f32,
-    pub floor_snap_distance: f32,
-    pub max_floor_angle: f32,
-    pub climb_up_walls: bool,
-    pub preserve_speed_on_floor: bool,
-    /// The distance the character moved last update
-    /// divided by delta time.
-    pub last_update_velocity: Vec3,
-    pub floor: Option<Floor>,
+/// Collisions that occured during the last movement.
+#[derive(Component, Default, Deref)]
+pub struct MovementCollisions(Vec<MovementCollision>);
+
+#[derive(Component, Default)]
+#[require(MovementConfig, MovementCollisions)]
+pub struct CharacterBody {
+    /// The desired movement acceleration.
+    ///
+    /// This is projected on slopes and applied to the character [`velocity`](Self::velocity)
+    /// before being reset every movement update.
+    ///
+    /// Because this is projected on slopes, it's ideal for movement input. For forces such
+    /// as gravity, it's better to modify [`velocity`](Self::velocity) directly.
+    pub acceleration: Vec3,
+    /// The current velocity of the character.
     pub velocity: Vec3,
-}
-
-impl Character {
-    pub fn is_on_floor(&self) -> bool {
-        self.floor.is_some()
-    }
-}
-
-impl Default for Character {
-    fn default() -> Self {
-        Self {
-            up_direction: Dir3::Y,
-            skin_width: 0.2,
-            floor_snap_distance: 0.1,
-            max_floor_angle: 45_f32.to_radians(),
-            climb_up_walls: false,
-            preserve_speed_on_floor: true,
-            floor: None,
-            last_update_velocity: Vec3::ZERO,
-            velocity: Vec3::ZERO,
-        }
-    }
+    /// The last movement of the character, divided by delta time.
+    pub last_update_velocity: Vec3,
+    /// Contains information about the floor the character is standing on, if any.
+    pub floor: Option<Floor>,
 }
 
 fn update_character_movement(
@@ -66,14 +51,33 @@ fn update_character_movement(
     mut gizmos: Gizmos,
     mut query: Query<(
         Entity,
-        &mut Character,
-        &mut LinearVelocity,
+        &mut CharacterBody,
+        &mut MovementCollisions,
+        &MovementConfig,
         &Collider,
         &mut Transform,
     )>,
     time: Res<Time>,
 ) {
-    for (entity, mut character, mut _velocity, shape, mut transform) in &mut query {
+    for (entity, mut character, mut collisions, config, shape, mut transform) in &mut query {
+        let acceleration = mem::take(&mut character.acceleration);
+
+        if let Some(floor) = character.floor {
+            character.velocity += slide_on_floor(
+                acceleration,
+                floor.normal,
+                config.up_direction,
+                config.preserve_speed_on_floor,
+            );
+        } else if let Some(wall) = collisions.last() {
+            character.velocity +=
+                slide_on_wall(acceleration, wall.normal, config.up_direction, false);
+        } else {
+            character.velocity += acceleration;
+        }
+
+        collisions.0.clear();
+
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
 
         let movement = move_and_slide(
@@ -81,28 +85,19 @@ fn update_character_movement(
             transform.translation,
             character.velocity,
             transform.rotation,
-            MovementConfig {
-                up_direction: character.up_direction,
-                skin_width: character.skin_width,
-                floor_snap_distance: character.floor_snap_distance,
-                max_floor_angle: character.max_floor_angle,
-                climb_up_walls: character.climb_up_walls,
-                max_slide_count: 12,
-                preserve_speed_on_floor: character.preserve_speed_on_floor,
-                apply_remaining_motion: true,
-            },
+            config.clone(),
             shape,
             &spatial,
             &filter,
             time.delta_secs(),
-            |_| {},
+            |collision| {
+                collisions.0.push(collision);
+            },
             &mut gizmos,
         );
 
         transform.translation = movement.position;
         character.velocity = movement.velocity;
-        // character.velocity =
-        //     movement.applied_motion / time.delta_secs() + movement.remaining_motion;
 
         if character.floor.is_none() && movement.floor.is_some() {
             println!("AIR --> GROUND");
@@ -113,7 +108,6 @@ fn update_character_movement(
         }
 
         character.floor = movement.floor;
-
         character.last_update_velocity = movement.applied_motion / time.delta_secs();
     }
 }
@@ -177,13 +171,13 @@ pub fn update_platform_velocity(
 }
 
 #[derive(Reflect, Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub enum SlopePlane {
+pub enum Slope {
     Floor,
     Wall,
     Roof,
 }
 
-impl SlopePlane {
+impl Slope {
     pub fn new(normal: Dir3, up_direction: Dir3, max_floor_angle: f32) -> Self {
         Self::new_and_angle(normal, up_direction, max_floor_angle).0
     }
@@ -201,23 +195,16 @@ impl SlopePlane {
     }
 
     pub fn is_floor(&self) -> bool {
-        matches!(self, SlopePlane::Floor)
+        matches!(self, Slope::Floor)
     }
 
     pub fn is_wall(&self) -> bool {
-        matches!(self, SlopePlane::Wall)
+        matches!(self, Slope::Wall)
     }
 
     pub fn is_roof(&self) -> bool {
-        matches!(self, SlopePlane::Roof)
+        matches!(self, Slope::Roof)
     }
-}
-
-// TODO: this should not be a component
-#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
-pub struct Floor {
-    pub entity: Entity,
-    pub normal: Dir3,
 }
 
 /// A collision which occured during a call to [`move_and_slide`].
@@ -225,22 +212,56 @@ pub struct Floor {
 pub struct MovementCollision {
     /// The velocity of the character before the collision occured.
     pub velocity: Vec3,
-    /// The hit result of the shape cast.
-    pub hit: ShapeHitData,
+    /// The entity the character interacted with.
+    pub entity: Entity,
+    pub point: Vec3,
+    pub normal: Dir3,
+    pub slope: Slope,
+}
+
+impl MovementCollision {
+    fn new(velocity: Vec3, slope: Slope, hit: ShapeHitData) -> Self {
+        Self {
+            velocity,
+            entity: hit.entity,
+            point: hit.point1,
+            normal: Dir3::new_unchecked(hit.normal1),
+            slope,
+        }
+    }
+}
+
+#[derive(Reflect, Debug, PartialEq, Clone, Copy)]
+pub struct Floor {
+    pub entity: Entity,
+    pub normal: Dir3,
 }
 
 /// Configuration for [`move_and_slide`].
+#[derive(Component, Reflect, PartialEq, Clone)]
 pub struct MovementConfig {
     pub up_direction: Dir3,
     pub skin_width: f32,
     pub floor_snap_distance: f32,
     pub max_floor_angle: f32,
-    pub climb_up_walls: bool,
-    pub preserve_speed_on_floor: bool,
     pub max_slide_count: usize,
-    /// If `true` the remaining motion will be applied to the [`MovementOutput::applied_motion`] after the last slide,
-    /// unless the slide count exceeded [`max_slide_count`](Self::max_slide_count).
-    pub apply_remaining_motion: bool,
+    pub preserve_speed_on_floor: bool,
+    /// Whether the character is allowed to climb up walls when walking on the ground.
+    pub climb_up_walls: bool,
+}
+
+impl Default for MovementConfig {
+    fn default() -> Self {
+        Self {
+            up_direction: Dir3::Y,
+            skin_width: 0.2,
+            floor_snap_distance: 0.1,
+            max_floor_angle: 45_f32.to_radians(),
+            climb_up_walls: false,
+            max_slide_count: 12,
+            preserve_speed_on_floor: true,
+        }
+    }
 }
 
 /// The result of a call to [`move_and_slide`].
@@ -353,9 +374,7 @@ pub fn move_and_slide(
             filter,
         ) else {
             // If nothing was hit, apply the remaining motion.
-            if config.apply_remaining_motion {
-                applied_motion += mem::take(&mut remaining_motion);
-            }
+            applied_motion += mem::take(&mut remaining_motion);
             break;
         };
 
@@ -363,10 +382,10 @@ pub fn move_and_slide(
         applied_motion += incoming;
         remaining_motion -= incoming;
 
-        on_collide(MovementCollision { velocity, hit }); // Trigger callbacks.
-
         let normal = Dir3::new_unchecked(hit.normal1);
-        let slope = SlopePlane::new(normal, config.up_direction, config.max_floor_angle);
+        let slope = Slope::new(normal, config.up_direction, config.max_floor_angle);
+
+        on_collide(MovementCollision::new(velocity, slope, hit)); // Trigger callbacks.
 
         let is_stuck = hit.distance == 0.0;
 
@@ -377,15 +396,18 @@ pub fn move_and_slide(
                 normal,
             });
 
+            // Might not be good idea, idk.
+            velocity = velocity.reject_from_normalized(*config.up_direction);
+
             // Slide on floor.
-            remaining_motion = project_on_floor(
+            remaining_motion = slide_on_floor(
                 remaining_motion,
                 normal,
                 config.up_direction,
                 config.preserve_speed_on_floor,
             );
         } else {
-            let valid_slope: fn(SlopePlane) -> bool = match is_stuck {
+            let valid_slope: fn(Slope) -> bool = match is_stuck {
                 true => |_| true,                  // If the character is stuck, fix all overlaps.
                 false => |slope| slope.is_floor(), // Otherwise, only fix overlaps with the floor.
             };
@@ -402,7 +424,7 @@ pub fn move_and_slide(
                 filter,
                 spatial,
                 |overlap| {
-                    valid_slope(SlopePlane::new(
+                    valid_slope(Slope::new(
                         config.up_direction,
                         Dir3::new_unchecked(overlap.hit.normal1),
                         config.max_floor_angle,
@@ -420,7 +442,7 @@ pub fn move_and_slide(
                     },
                 );
 
-                remaining_motion = project_on_floor(
+                remaining_motion = slide_on_floor(
                     remaining_motion,
                     normal,
                     config.up_direction,
@@ -432,14 +454,20 @@ pub fn move_and_slide(
                 is_on_wall = true;
 
                 // Slide motion and velocity.
-                remaining_motion = project_on_wall(
+                // remaining_motion = remaining_motion.reject_from_normalized(*normal);
+                // velocity = velocity.reject_from_normalized(*normal);
+                remaining_motion = slide_on_wall(
                     remaining_motion,
                     normal,
                     config.up_direction,
-                    config.climb_up_walls,
+                    previous_floor.is_none() || config.climb_up_walls,
                 );
-                velocity =
-                    project_on_wall(velocity, normal, config.up_direction, config.climb_up_walls);
+                velocity = slide_on_wall(
+                    velocity,
+                    normal,
+                    config.up_direction,
+                    previous_floor.is_none() || config.climb_up_walls,
+                );
             };
         }
     }
@@ -447,7 +475,7 @@ pub fn move_and_slide(
     // 3. Solve remaining overlaps.
     let mut overlap_amount = 0.0;
 
-    for _ in 0..1 {
+    for _ in 0..6 {
         overlap_amount = 0.0;
 
         if let Some(..) = get_penetration(
@@ -471,17 +499,14 @@ pub fn move_and_slide(
                 overlap_amount += overlap.depth;
 
                 let normal = Dir3::new_unchecked(overlap.hit.normal1);
-                let slope = SlopePlane::new(normal, config.up_direction, config.max_floor_angle);
+                let slope = Slope::new(normal, config.up_direction, config.max_floor_angle);
 
                 // Trigger callbacks.
-                on_collide(MovementCollision {
-                    velocity,
-                    hit: overlap.hit,
-                });
+                on_collide(MovementCollision::new(velocity, slope, overlap.hit));
 
                 match slope {
                     // Only push the character on the horizontal axis.
-                    SlopePlane::Floor => {
+                    Slope::Floor => {
                         vertical_fix += overlap.penetration();
 
                         // We may still be overlapping a lil bit after jumping.
@@ -493,14 +518,14 @@ pub fn move_and_slide(
                         }
                     }
                     // TODO: rooof might require special behavoir, idk.
-                    SlopePlane::Wall | SlopePlane::Roof => {
+                    Slope::Wall | Slope::Roof => {
                         is_on_wall = true; // A roof is just a different type of wall.
 
-                        velocity = project_on_wall(
+                        velocity = slide_on_wall(
                             velocity,
                             normal,
                             config.up_direction,
-                            config.climb_up_walls,
+                            previous_floor.is_none() || config.climb_up_walls,
                         );
 
                         match config.climb_up_walls {
@@ -543,7 +568,7 @@ pub fn move_and_slide(
             filter,
             |hit| {
                 let normal = Dir3::new_unchecked(hit.normal1);
-                let slope = SlopePlane::new(normal, config.up_direction, config.max_floor_angle);
+                let slope = Slope::new(normal, config.up_direction, config.max_floor_angle);
 
                 if !slope.is_floor() {
                     return true;
@@ -590,17 +615,9 @@ pub fn move_and_slide(
 }
 
 /// Project the `vector` onto the `normal` plane.
-///
-/// If `allow_sliding_up` is `false`, the horizontal part of the `vector` (relative to `up_direction`)
-/// will not contribute to the positive vertical part of the resulting vector.
 #[must_use]
-pub fn project_on_wall(
-    vector: Vec3,
-    normal: Dir3,
-    up_direction: Dir3,
-    allow_sliding_up: bool,
-) -> Vec3 {
-    match allow_sliding_up {
+pub fn slide_on_wall(vector: Vec3, normal: Dir3, up_direction: Dir3, climb_up: bool) -> Vec3 {
+    match climb_up {
         true => vector.reject_from_normalized(*normal),
         false => {
             let DecomposedMotion {
@@ -614,13 +631,10 @@ pub fn project_on_wall(
                 return vertical + horizontal; // This is not a wall.
             };
 
-            if vector.dot(tangent.cross(*up_direction)) > 0.0 {
-                // Slide along the wall but not towards it.
-                horizontal = horizontal.project_onto_normalized(*tangent);
-            } else {
-                // Not doing this resulted in bouncing while sliding down walls.
-                horizontal = horizontal.reject_from_normalized(*normal);
-            }
+            let par_normal = tangent.cross(*up_direction);
+
+            horizontal -= horizontal.dot(par_normal).max(0.0) * par_normal;
+            horizontal = horizontal.reject_from_normalized(*normal);
 
             vertical + horizontal
         }
@@ -631,7 +645,7 @@ pub fn project_on_wall(
 ///
 /// When `preserve_speed` is `true` the magnitude of the resulting vector will remain the same as that of the input `vector`.
 #[must_use]
-pub fn project_on_floor(
+pub fn slide_on_floor(
     vector: Vec3,
     normal: Dir3,
     up_direction: Dir3,

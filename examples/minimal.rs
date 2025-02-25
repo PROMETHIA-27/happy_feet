@@ -4,9 +4,9 @@ use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*, render::camera::CameraProjection};
 use rand::{prelude::*, rng};
 use slither::{
-    CalculatedVelocity, Character, CharacterMovementPlugin, CharacterMovementSystems, Floor,
-    MovementConfig, MovingPlatform, RotatingPlatform, SlopePlane, move_and_slide, project_on_floor,
-    update_platform_velocity,
+    CalculatedVelocity, CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, Floor,
+    MovementCollisions, MovementConfig, MovingPlatform, RotatingPlatform, Slope, move_and_slide,
+    slide_on_floor, slide_on_wall, update_platform_velocity,
 };
 
 fn main() -> AppExit {
@@ -28,10 +28,7 @@ fn main() -> AppExit {
                 setup_platforms,
             ),
         )
-        .add_systems(
-            Update,
-            (update_input, update_follow_camera, update_player_rotation),
-        )
+        .add_systems(Update, (update_input, update_follow_camera))
         .add_systems(
             FixedUpdate,
             (
@@ -70,9 +67,6 @@ impl MovementInput {
 }
 
 #[derive(Component)]
-struct CharacterVelocity(Vec3);
-
-#[derive(Component)]
 enum MovementMode {
     Walking,
     Flying,
@@ -88,10 +82,7 @@ struct EulerRotation {
 #[derive(Component)]
 struct FollowTarget {
     target: Entity,
-    // target_position: Vec3,
-    // target_rotation: Quat,
-    target_distance: f32,
-    target_angle: f32,
+    distance: f32,
     speed: f32,
 }
 
@@ -103,20 +94,16 @@ fn setup_player(
     let player = commands
         .spawn((
             Player,
-            Character {
+            CharacterBody::default(),
+            MovementConfig {
                 skin_width: SKIN_WIDTH,
-                climb_up_walls: false,
-                floor_snap_distance: 0.0,
+                climb_up_walls: true,
+                floor_snap_distance: 0.1,
                 ..Default::default()
             },
             MovementInput::default(),
             MovementMode::Flying,
-            CharacterVelocity(Vec3::ZERO),
-            (
-                RigidBody::Kinematic,
-                GravityScale(0.0),
-                LockedAxes::ROTATION_LOCKED,
-            ),
+            RigidBody::Kinematic,
             Collider::capsule(1.0, 2.0),
             Transform {
                 translation: Vec3::Y * 10.0,
@@ -139,9 +126,8 @@ fn setup_player(
             EulerRotation::default(),
             FollowTarget {
                 target: player,
-                target_distance: 1.0,
-                target_angle: 60_f32.to_radians(),
-                speed: 4.0,
+                distance: 0.0,
+                speed: 10.0,
             },
             Transform {
                 translation: Vec3::Y * 2.0,
@@ -177,8 +163,8 @@ fn update_follow_camera(
             continue;
         };
 
-        if distance > follow.target_distance {
-            let excess = follow.target_distance - distance;
+        if distance > follow.distance {
+            let excess = follow.distance - distance;
             transform1.translation -= excess * follow.speed * time.delta_secs() * direction;
         }
 
@@ -188,35 +174,6 @@ fn update_follow_camera(
         transform1
             .translation
             .smooth_nudge(&target, follow.speed, time.delta_secs());
-    }
-}
-
-fn update_player_rotation(
-    followers: Query<(&Transform, &FollowTarget)>,
-    mut targets: Query<&mut Transform, Without<FollowTarget>>,
-) {
-    for (transform1, follow) in &followers {
-        let Ok(mut transform2) = targets.get_mut(follow.target) else {
-            continue;
-        };
-
-        // transform2.aligned_by(main_axis, main_direction, secondary_axis, secondary_direction)
-
-        let delta = transform2.translation.reject_from_normalized(Vec3::Y)
-            - transform1.translation.reject_from_normalized(Vec3::Y);
-
-        let Ok(direction) = Dir3::new(delta) else {
-            continue;
-        };
-
-        // let angle = transform1.right().angle_between(Vec3::X) * PI;
-
-        // let direction = transform1
-        //     .forward()
-        //     .reject_from_normalized(Vec3::Y)
-        //     .normalize();
-
-        // transform2.look_to(direction, Vec3::Y);
     }
 }
 
@@ -453,8 +410,16 @@ fn update_input(
 
         follow_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
 
-        let (mut player_transform, ..) = players.get_mut(follow.target).unwrap();
-        player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, 0.0, 0.0);
+        let (mut player_transform, _, mode) = players.get_mut(follow.target).unwrap();
+
+        match *mode {
+            MovementMode::Walking => {
+                player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, 0.0, 0.0);
+            }
+            MovementMode::Flying => {
+                player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
+            }
+        }
 
         follow_transform.translation.smooth_nudge(
             &player_transform.translation,
@@ -467,8 +432,8 @@ fn update_input(
 fn update_movement(
     mut query: Query<
         (
-            &mut Character,
-            &mut LinearVelocity,
+            &mut CharacterBody,
+            &MovementCollisions,
             &MovementInput,
             &MovementMode,
             &Transform,
@@ -479,7 +444,7 @@ fn update_movement(
 ) {
     const GRAVITY: f32 = 21.0;
 
-    for (mut character, mut _velocity, input, mode, transform) in &mut query {
+    for (mut character, collisions, input, mode, transform) in &mut query {
         let target_speed = match input.is_sprinting {
             true => 35.0,
             false => 15.0,
@@ -489,9 +454,13 @@ fn update_movement(
             MovementMode::Walking => {
                 if input.buffered.y > 0.0 {
                     let jump_height = 4.0;
-                    let jump_accel = f32::sqrt(2.0 * GRAVITY * jump_height) * Vec3::Y;
+                    let jump_accel = f32::sqrt(2.0 * GRAVITY * jump_height);
 
-                    character.velocity += jump_accel;
+                    if character.floor.is_some() {
+                        character.velocity += jump_accel * Vec3::Y;
+                    } else if let Some(wall) = collisions.last() {
+                        character.velocity += jump_accel * wall.normal;
+                    }
 
                     character.floor = None;
                 }
@@ -501,7 +470,7 @@ fn update_movement(
                 {
                     let max_acceleration = match character.floor.is_some() {
                         true => 400.0,
-                        false => 40.0,
+                        false => 20.0,
                     };
 
                     let accel = acceleration(
@@ -512,12 +481,7 @@ fn update_movement(
                         time.delta_secs(),
                     );
 
-                    if let Some(floor) = character.floor {
-                        let accel = project_on_floor(accel, floor.normal, Dir3::Y, true);
-                        character.velocity += accel;
-                    } else {
-                        character.velocity += accel;
-                    }
+                    character.acceleration += accel;
                 }
 
                 if character.floor.is_some() {
