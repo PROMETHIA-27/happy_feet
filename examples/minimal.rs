@@ -4,8 +4,9 @@ use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
-    CalculatedVelocity, Floor, MovementConfig, MovingPlatform, RotatingPlatform, SlopePlane,
-    move_and_slide, project_on_floor, update_platform_velocity,
+    CalculatedVelocity, Character, CharacterMovementPlugin, CharacterMovementSystems, Floor,
+    MovementConfig, MovingPlatform, RotatingPlatform, SlopePlane, move_and_slide, project_on_floor,
+    update_platform_velocity,
 };
 
 fn main() -> AppExit {
@@ -14,6 +15,7 @@ fn main() -> AppExit {
             DefaultPlugins,
             PhysicsPlugins::new(FixedPostUpdate),
             PhysicsDebugPlugin::new(FixedPostUpdate),
+            CharacterMovementPlugin,
         ))
         .add_systems(Startup, setup_player)
         .add_systems(
@@ -26,21 +28,22 @@ fn main() -> AppExit {
                 setup_platforms,
             ),
         )
-        .add_systems(Update, input)
+        .add_systems(Update, update_input)
         .add_systems(
             FixedUpdate,
             (
                 update_platforms,
                 update_platform_velocity,
-                update,
+                update_movement,
                 clear_buffered_input,
             )
+                .before(CharacterMovementSystems)
                 .chain(),
         )
         .run()
 }
 
-const SKIN_WIDTH: f32 = 0.1;
+const SKIN_WIDTH: f32 = 0.2;
 
 #[derive(Component)]
 #[require(Transform)]
@@ -53,6 +56,7 @@ struct Player;
 struct MovementInput {
     current: Vec3,
     buffered: Vec3,
+    is_sprinting: bool,
 }
 
 impl MovementInput {
@@ -79,6 +83,11 @@ fn setup_player(
     commands
         .spawn((
             Player,
+            Character {
+                skin_width: SKIN_WIDTH,
+                climb_up_walls: true,
+                ..Default::default()
+            },
             MovementInput::default(),
             MovementMode::Flying,
             CharacterVelocity(Vec3::ZERO),
@@ -293,7 +302,7 @@ fn update_platforms(
     }
 }
 
-fn input(
+fn update_input(
     mut motion: EventReader<MouseMotion>,
     key: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -305,7 +314,7 @@ fn input(
 
     let mouse_delta: Vec2 = motion.read().map(|m| m.delta).sum();
 
-    let mut input = button_axis_3d(
+    let mut move_axis = button_axis_3d(
         &key,
         KeyCode::KeyA..KeyCode::KeyD,
         KeyCode::KeyQ..KeyCode::KeyE,
@@ -313,10 +322,12 @@ fn input(
     );
 
     let pressed_jump = key.just_pressed(KeyCode::Space);
-
+    let holding_sprint = key.pressed(KeyCode::ShiftLeft);
     let change_mode = key.just_pressed(KeyCode::Tab);
 
-    for (mut transform, mut movement, mut mode) in &mut query {
+    for (mut transform, mut input, mut mode) in &mut query {
+        input.is_sprinting = holding_sprint;
+
         if change_mode {
             *mode = match *mode {
                 MovementMode::Walking => MovementMode::Flying,
@@ -326,12 +337,12 @@ fn input(
 
         if let MovementMode::Walking = *mode {
             if pressed_jump {
-                input.y = 1.0;
+                move_axis.y = 1.0;
             } else {
-                input.y = 0.0;
+                move_axis.y = 0.0;
             }
         }
-        movement.set(input);
+        input.set(move_axis);
 
         let right = transform.right();
         transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
@@ -339,217 +350,90 @@ fn input(
     }
 }
 
-#[derive(Component)]
-struct WallNormal(Dir3);
-
-fn update(
-    mut commands: Commands,
-    mut noclip_enabled: Local<bool>,
-    mut gravity_enabled: Local<bool>,
-    mut gizmos: Gizmos,
-    spatial: SpatialQuery,
+fn update_movement(
     mut query: Query<
         (
-            Entity,
-            &Collider,
-            &mut Transform,
-            &mut CharacterVelocity,
-            // &mut LinearVelocity,
+            &mut Character,
+            &mut LinearVelocity,
             &MovementInput,
             &MovementMode,
-            Option<&Floor>,
-            Option<&WallNormal>,
+            &Transform,
         ),
         With<Player>,
     >,
-    platforms: Query<(&CalculatedVelocity, &Transform), Without<Player>>,
     time: Res<Time>,
-    key: Res<ButtonInput<KeyCode>>,
 ) {
-    if key.just_pressed(KeyCode::Space) {
-        *gravity_enabled = !*gravity_enabled;
-    }
+    const GRAVITY: f32 = 21.0;
 
-    if key.just_pressed(KeyCode::Escape) {
-        *noclip_enabled = !*noclip_enabled;
-    }
+    for (mut character, mut _velocity, input, mode, transform) in &mut query {
+        let target_speed = match input.is_sprinting {
+            true => 35.0,
+            false => 15.0,
+        };
 
-    let is_sprinting = key.pressed(KeyCode::ShiftLeft);
+        match mode {
+            MovementMode::Walking => {
+                if input.buffered.y > 0.0 {
+                    let jump_height = 4.0;
+                    let jump_accel = f32::sqrt(2.0 * GRAVITY * jump_height) * Vec3::Y;
 
-    for (entity, shape, mut transform, mut velocity, input, mode, mut floor, wall) in &mut query {
-        let inherited_velocity;
-        if let Some((vel, platform_trans)) = floor.and_then(|p| platforms.get(p.entity).ok()) {
-            let offset = transform.translation - platform_trans.translation;
-            let tangental_vel = vel.angular.cross(offset);
-            inherited_velocity = vel.linear + tangental_vel;
-            // inherited_velocity = vel.linear;
-        } else {
-            inherited_velocity = Vec3::ZERO
-        }
+                    character.velocity += jump_accel;
 
-        let mut did_jump = false;
-        {
-            let vel = &mut velocity.0;
+                    character.floor = None;
+                }
 
-            let mut target_speed = 15.0;
-
-            if is_sprinting {
-                target_speed *= 2.0;
-            }
-
-            match mode {
-                MovementMode::Walking => {
-                    let movement_input = Vec3::new(input.buffered.x, 0.0, input.buffered.z);
-                    let jump_input = input.buffered.y > 0.0;
-                    let dir = (transform.rotation * movement_input.clamp_length_max(1.0))
-                        .reject_from(Vec3::Y)
-                        .clamp_length_max(1.0);
-
-                    let gravity = 20.0;
-                    let max_acceleration;
-
-                    if floor.is_some() {
-                        // Friction
-                        let len = vel.length();
-                        *vel -=
-                            vel.normalize_or_zero() * f32::min(len, len * 10.0 * time.delta_secs());
-
-                        max_acceleration = 200.0;
-                    } else {
-                        max_acceleration = 20.0;
-                        *vel -= Vec3::Y * time.delta_secs() * gravity; // Gravity
-                    }
-
-                    if let Ok(dir) = Dir3::new(dir) {
-                        let accel = acceleration(
-                            *vel,
-                            dir,
-                            max_acceleration,
-                            target_speed,
-                            time.delta_secs(),
-                        );
-
-                        if let Some(floor) = floor {
-                            *vel += project_on_floor(accel, floor.normal, Dir3::Y, true);
-                        } else {
-                            *vel += accel;
-                        }
-                    }
-
-                    let jump_dir = match wall {
-                        Some(wall) if floor.is_none() => Some(wall.0.slerp(Dir3::Y, 0.5)),
-                        _ if floor.is_some() => Some(Dir3::Y),
-                        _ => Some(Dir3::Y),
+                if let Ok(direction) =
+                    Dir3::new((transform.rotation * input.buffered).reject_from_normalized(Vec3::Y))
+                {
+                    let max_acceleration = match character.floor.is_some() {
+                        true => 400.0,
+                        false => 40.0,
                     };
 
-                    if let Some(jump_dir) = jump_dir {
-                        if jump_input {
-                            let jump_height = 4.0;
-                            let jump_accel = f32::sqrt(2.0 * gravity * jump_height);
-                            *vel += jump_dir * jump_accel;
-                            did_jump = true;
-                        }
+                    let accel = acceleration(
+                        character.velocity,
+                        direction,
+                        max_acceleration,
+                        target_speed,
+                        time.delta_secs(),
+                    );
+
+                    if let Some(floor) = character.floor {
+                        let accel = project_on_floor(accel, floor.normal, Dir3::Y, true);
+                        character.velocity += accel;
+                    } else {
+                        character.velocity += accel;
                     }
                 }
-                MovementMode::Flying => {
-                    let dir = transform.rotation * input.buffered.normalize_or_zero();
 
-                    if let Ok(dir) = Dir3::new(dir) {
-                        let accel = acceleration(*vel, dir, 400.0, target_speed, time.delta_secs());
-                        *vel += accel; // Input
-                    }
-
-                    *vel -= *vel * 20.0 * time.delta_secs(); // Friction
+                if character.floor.is_some() {
+                    let fric = friction(character.velocity, 10.0, time.delta_secs());
+                    character.velocity += fric;
+                } else {
+                    character.velocity -= GRAVITY * Vec3::Y * time.delta_secs();
                 }
             }
-        }
-
-        if *noclip_enabled {
-            transform.translation += velocity.0 * time.delta_secs();
-            continue;
-        }
-
-        let filter = SpatialQueryFilter::from_excluded_entities([entity]);
-
-        if did_jump {
-            floor = None;
-        }
-
-        let mut wall = None;
-        let output = move_and_slide(
-            floor.copied(),
-            transform.translation,
-            velocity.0,
-            transform.rotation,
-            MovementConfig {
-                up_direction: Dir3::Y,
-                skin_width: SKIN_WIDTH,
-                floor_snap_distance: 0.1,
-                max_floor_angle: 45_f32.to_radians(),
-                max_slide_count: 16,
-                apply_remaining_motion: true,
-                preserve_speed_on_floor: true,
-                allow_sliding_up_walls: true,
-            },
-            shape,
-            &spatial,
-            &filter,
-            time.delta_secs(),
-            |collision| {
-                let normal = Dir3::new_unchecked(collision.hit.normal1);
-                let slope = SlopePlane::new(normal, Dir3::Y, 45_f32.to_radians());
-                if slope.is_wall() {
-                    wall = Some(normal)
+            MovementMode::Flying => {
+                if let Ok(direction) = Dir3::new(transform.rotation * input.buffered) {
+                    let accel = acceleration(
+                        character.velocity,
+                        direction,
+                        400.0,
+                        target_speed,
+                        time.delta_secs(),
+                    );
+                    character.velocity += accel;
                 }
-            },
-            &mut gizmos,
-        );
-        // transform.translation += inherited_velocity * time.delta_secs();
-        // let delta = transform.translation + output.position - transform.translation;
-        transform.translation = output.position;
 
-        velocity.0 = output.velocity;
-        // dbg!(velocity.0);
-        // velocity.0 = output.motion / time.delta_secs();
-
-        // dbg!(output.motion.length());
-
-        // velocity.0.y += dbg!(output.motion.y);
-
-        // if did_jump {}
-
-        // velocity.0 = output.motion / time.delta_secs();
-
-        // dbg!(velocity.0.length());
-        // dbg!(delta.length());
-        // dbg!(delta.reject_from_normalized(Vec3::Y).length());
-
-        if output.overlap_amount > SKIN_WIDTH {
-            println!("!!! STUCK STUCK STUCK !!!");
-        }
-
-        if let Some(wall) = wall {
-            commands.entity(entity).insert(WallNormal(wall));
-        } else {
-            commands.entity(entity).remove::<WallNormal>();
-        }
-
-        if let Some(new_floor) = output.floor {
-            if
-            // !did_jump
-            true {
-                if floor.is_none() {
-                    println!("ON FLOOR");
-                }
-                commands.entity(entity).insert(new_floor);
+                let fric = friction(character.velocity, 10.0, time.delta_secs());
+                character.velocity += fric;
             }
-        } else if floor.is_some() {
-            println!("NOT ON FLOOR");
-            velocity.0 += inherited_velocity;
-            commands.entity(entity).remove::<Floor>();
         }
     }
 }
+
+#[derive(Component)]
+struct WallNormal(Dir3);
 
 fn clear_buffered_input(mut query: Query<&mut MovementInput>) {
     for mut input in &mut query {
@@ -579,7 +463,7 @@ where
     }
 }
 
-pub fn acceleration(
+fn acceleration(
     velocity: Vec3,
     direction: Dir3,
     max_acceleration: f32,
@@ -596,4 +480,9 @@ pub fn acceleration(
     // Clamp to avoid acceleration past the target speed.
     let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
     accel_speed * direction
+}
+
+fn friction(velocity: Vec3, friction: f32, delta: f32) -> Vec3 {
+    let length = velocity.length();
+    -velocity.normalize_or_zero() * f32::min(length, length * friction * delta)
 }
