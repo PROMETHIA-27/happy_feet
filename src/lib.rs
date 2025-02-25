@@ -39,12 +39,18 @@ pub struct Character {
     pub velocity: Vec3,
 }
 
+impl Character {
+    pub fn is_on_floor(&self) -> bool {
+        self.floor.is_some()
+    }
+}
+
 impl Default for Character {
     fn default() -> Self {
         Self {
             up_direction: Dir3::Y,
-            skin_width: 0.1,
-            floor_snap_distance: 0.5,
+            skin_width: 0.2,
+            floor_snap_distance: 0.1,
             max_floor_angle: 45_f32.to_radians(),
             climb_up_walls: false,
             preserve_speed_on_floor: true,
@@ -259,14 +265,45 @@ pub struct MovementOutput {
     pub overlap_amount: f32,
 }
 
+#[must_use]
+fn move_and_collide(
+    origin: Vec3,
+    motion: Vec3,
+    rotation: Quat,
+    skin_width: f32,
+    shape: &Collider,
+    spatial: &SpatialQuery,
+    filter: &SpatialQueryFilter,
+) -> Option<(Vec3, ShapeHitData)> {
+    let (direction, length) = Dir3::new_and_length(motion).ok()?;
+
+    let hit = spatial.cast_shape(
+        shape,
+        origin,
+        rotation,
+        direction,
+        &ShapeCastConfig {
+            max_distance: length + skin_width,
+            target_distance: skin_width,
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: true,
+        },
+        filter,
+    )?;
+
+    Some((direction * (hit.distance - skin_width), hit))
+}
+
 // FIXME:
 // - ~~Jumping doesn't work when walking up steep slopes~~.
-// - Hugging wall slopes when climb_up_walls is false results in gravity being canceled out somehow. pls fix
+// - ~~Hugging wall slopes when climb_up_walls is false results in gravity being canceled out somehow. pls fix~~
+// - Floor snap is making climb up walls not work while previously on the floor.
 //
 // TODO:
 // - More configuration options.
 // - Stair stepping.
 // - Moving platforms (properly this time).
+// - gravity pass?
 /// Sweep in the direction of `velocity` and slide along surfaces.
 ///
 /// Returns [`MovementOutput`] which contains information about the movement,
@@ -305,34 +342,22 @@ pub fn move_and_slide(
     let mut overlaps_buffer = Vec::with_capacity(8);
 
     for _ in 0..config.max_slide_count {
-        // Slide untill there's no more motion.
-        let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
-            break;
-        };
-
         // 1. Sweep in the movement direction.
-        let Some(hit) = spatial.cast_shape(
-            shape,
+        let Some((incoming, hit)) = move_and_collide(
             origin + applied_motion,
+            remaining_motion,
             rotation,
-            direction,
-            &ShapeCastConfig {
-                max_distance: length + config.skin_width,
-                target_distance: config.skin_width,
-                compute_contact_on_penetration: true,
-                ignore_origin_penetration: true,
-            },
+            config.skin_width,
+            shape,
+            spatial,
             filter,
         ) else {
             // If nothing was hit, apply the remaining motion.
             if config.apply_remaining_motion {
                 applied_motion += mem::take(&mut remaining_motion);
             }
-
             break;
         };
-
-        let incoming = direction * (hit.distance - config.skin_width);
 
         // Move as close to the geometry as possible.
         applied_motion += incoming;
@@ -585,8 +610,17 @@ pub fn project_on_wall(
 
             vertical = vertical.reject_from_normalized(*normal);
 
-            horizontal = horizontal.reject_from_normalized(*normal);
-            horizontal -= horizontal.dot(*up_direction).max(0.0) * up_direction;
+            let Ok(tangent) = Dir3::new(normal.cross(*up_direction)) else {
+                return vertical + horizontal; // This is not a wall.
+            };
+
+            if vector.dot(tangent.cross(*up_direction)) > 0.0 {
+                // Slide along the wall but not towards it.
+                horizontal = horizontal.project_onto_normalized(*tangent);
+            } else {
+                // Not doing this resulted in bouncing while sliding down walls.
+                horizontal = horizontal.reject_from_normalized(*normal);
+            }
 
             vertical + horizontal
         }
@@ -603,32 +637,40 @@ pub fn project_on_floor(
     up_direction: Dir3,
     preserve_speed: bool,
 ) -> Vec3 {
-    let horizontal_motion = vector.reject_from_normalized(*up_direction);
+    let DecomposedMotion {
+        mut vertical,
+        horizontal,
+    } = DecomposedMotion::new(vector, up_direction);
 
-    let horizontal_length_sq = horizontal_motion.length_squared();
-
-    if horizontal_length_sq < 1e-4 {
-        return Vec3::ZERO;
+    // Remove vertical velocity going downwards.
+    if vertical.dot(*up_direction) < 0.0 {
+        vertical = Vec3::ZERO;
     }
 
-    let Ok(tangent) = Dir3::new(horizontal_motion.cross(*up_direction)) else {
-        return horizontal_motion;
+    let horizontal_length_sq = horizontal.length_squared();
+
+    if horizontal_length_sq < 1e-4 {
+        return vertical;
+    }
+
+    let Ok(tangent) = Dir3::new(horizontal.cross(*up_direction)) else {
+        return vertical; // Horizontal velocity is zero.
     };
 
     let Ok(direction) = Dir3::new(normal.cross(*tangent)) else {
-        todo!("dhaowidh") // I don't know if this can even fail???
+        return vertical + horizontal; // Horizontal direction is perfectly perpendicular with the normal.
     };
 
-    let horizontal_motion = horizontal_motion.project_onto_normalized(*direction);
+    let horizontal = horizontal.project_onto_normalized(*direction);
 
     // Scale the projected vector with the old length to preserve the magnitude.
     if preserve_speed {
-        let Ok(horizontal_direction) = Dir3::new(horizontal_motion) else {
-            return Vec3::ZERO;
+        let Ok(horizontal_direction) = Dir3::new(horizontal) else {
+            return vertical;
         };
-        f32::sqrt(horizontal_length_sq) * horizontal_direction
+        vertical + f32::sqrt(horizontal_length_sq) * horizontal_direction
     } else {
-        horizontal_motion
+        vertical + horizontal
     }
 }
 
