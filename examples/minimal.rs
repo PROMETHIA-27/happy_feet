@@ -1,7 +1,7 @@
 use std::{hash::Hash, ops::Range};
 
 use avian3d::{math::PI, prelude::*};
-use bevy::{input::mouse::MouseMotion, prelude::*};
+use bevy::{input::mouse::MouseMotion, prelude::*, render::camera::CameraProjection};
 use rand::{prelude::*, rng};
 use slither::{
     CalculatedVelocity, Character, CharacterMovementPlugin, CharacterMovementSystems, Floor,
@@ -47,7 +47,7 @@ const SKIN_WIDTH: f32 = 0.2;
 
 #[derive(Component)]
 #[require(Transform)]
-struct CameraPole;
+struct CameraArm;
 
 #[derive(Component)]
 struct Player;
@@ -85,7 +85,7 @@ fn setup_player(
             Player,
             Character {
                 skin_width: SKIN_WIDTH,
-                climb_up_walls: true,
+                climb_up_walls: false,
                 ..Default::default()
             },
             MovementInput::default(),
@@ -111,7 +111,7 @@ fn setup_player(
             ));
             player
                 .spawn((
-                    CameraPole,
+                    CameraArm,
                     Transform {
                         translation: Vec3::Y * 2.0,
                         ..Default::default()
@@ -119,8 +119,12 @@ fn setup_player(
                 ))
                 .with_child((
                     Camera3d::default(),
+                    Projection::Perspective(PerspectiveProjection {
+                        fov: 80_f32.to_radians(),
+                        ..Default::default()
+                    }),
                     Transform {
-                        translation: Vec3::Z * 20.0,
+                        translation: Vec3::Z * 10.0, // Camera distance.
                         ..Default::default()
                     },
                 ));
@@ -306,7 +310,8 @@ fn update_input(
     mut motion: EventReader<MouseMotion>,
     key: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut query: Query<(&mut Transform, &mut MovementInput, &mut MovementMode), With<Player>>,
+    mut players: Query<(&mut Transform, &mut MovementInput, &mut MovementMode), With<Player>>,
+    mut cameras: Query<&mut Transform, (With<CameraArm>, Without<Player>)>,
 ) {
     if !mouse.pressed(MouseButton::Left) {
         motion.clear();
@@ -325,7 +330,7 @@ fn update_input(
     let holding_sprint = key.pressed(KeyCode::ShiftLeft);
     let change_mode = key.just_pressed(KeyCode::Tab);
 
-    for (mut transform, mut input, mut mode) in &mut query {
+    for (mut transform, mut input, mut mode) in &mut players {
         input.is_sprinting = holding_sprint;
 
         if change_mode {
@@ -342,11 +347,18 @@ fn update_input(
                 move_axis.y = 0.0;
             }
         }
+
         input.set(move_axis);
 
+        // let right = transform.right();
+        // transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
+        transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
+    }
+
+    for mut transform in &mut cameras {
         let right = transform.right();
         transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
-        transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
+        // transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
     }
 }
 

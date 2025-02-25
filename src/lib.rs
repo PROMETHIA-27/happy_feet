@@ -261,6 +261,7 @@ pub struct MovementOutput {
 
 // FIXME:
 // - ~~Jumping doesn't work when walking up steep slopes~~.
+// - Hugging wall slopes when climb_up_walls is false results in gravity being canceled out somehow. pls fix
 //
 // TODO:
 // - More configuration options.
@@ -298,6 +299,8 @@ pub fn move_and_slide(
     let inflated_shape = inflate_shape(shape, config.skin_width); // Make the shape thick.
 
     let mut floor = None;
+
+    let mut is_on_wall = false;
 
     let mut overlaps_buffer = Vec::with_capacity(8);
 
@@ -399,7 +402,11 @@ pub fn move_and_slide(
                     config.preserve_speed_on_floor,
                 );
             } else {
-                // Slide on walls.
+                // If there's no penetration with the floor then it's probably a wall, right?
+
+                is_on_wall = true;
+
+                // Slide motion and velocity.
                 remaining_motion = project_on_wall(
                     remaining_motion,
                     normal,
@@ -462,6 +469,8 @@ pub fn move_and_slide(
                     }
                     // TODO: rooof might require special behavoir, idk.
                     SlopePlane::Wall | SlopePlane::Roof => {
+                        is_on_wall = true; // A roof is just a different type of wall.
+
                         velocity = project_on_wall(
                             velocity,
                             normal,
@@ -490,8 +499,6 @@ pub fn move_and_slide(
     //
     // We skip this when there was no floor previously to avoid suddenly
     // snapping to the ground when falling off a ledge or after jumping.
-    //
-    // FIXME: Find a way to make climbing up walls (from the floor) work.
     if previous_floor.is_some() && floor.is_none() {
         let aabb = shape.aabb(Vec3::ZERO, rotation);
         let half_height = aabb.size().dot(*config.up_direction) / 2.0;
@@ -521,6 +528,11 @@ pub fn move_and_slide(
                     entity: hit.entity,
                     normal,
                 });
+
+                // Don't snap when climbing up a wall.
+                if config.climb_up_walls && is_on_wall && config.up_direction.dot(velocity) > 0.0 {
+                    return false;
+                }
 
                 // Temporary hack to make sure the floor is not blocked by a wall or something.
                 let Some(..) = spatial.cast_ray(
