@@ -5,6 +5,8 @@ use bevy::{
 };
 use std::mem;
 
+pub mod seegull;
+
 // TODO: components and systems for character.
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -28,7 +30,7 @@ impl Plugin for CharacterMovementPlugin {
 pub struct MovementCollisions(Vec<MovementCollision>);
 
 #[derive(Component, Default)]
-#[require(MovementConfig, MovementCollisions)]
+#[require(MovementConfig, MovementCollisions, RigidBody(|| RigidBody::Kinematic))]
 pub struct CharacterBody {
     /// The desired movement acceleration.
     ///
@@ -38,9 +40,10 @@ pub struct CharacterBody {
     /// Because this is projected on slopes, it's ideal for movement input. For forces such
     /// as gravity, it's better to modify [`velocity`](Self::velocity) directly.
     pub acceleration: Vec3,
-    /// The current velocity of the character.
+    /// The current velocity of the character. The character will move by this amount,
+    /// scaled by [`Time::delta_secs`] very movement update.
     pub velocity: Vec3,
-    /// The last movement of the character, divided by delta time.
+    /// The last movement of the character, divided by [`Time::delta_secs`].
     pub last_update_velocity: Vec3,
     /// Contains information about the floor the character is standing on, if any.
     pub floor: Option<Floor>,

@@ -1,11 +1,21 @@
 use std::{hash::Hash, ops::Range};
 
-use avian3d::{math::PI, prelude::*};
-use bevy::{input::mouse::MouseMotion, prelude::*, render::camera::CameraProjection};
+use avian3d::{
+    math::{PI, TAU},
+    prelude::*,
+};
+use bevy::{
+    ecs::schedule::ScheduleLabel, input::mouse::MouseMotion, prelude::*,
+    render::camera::CameraProjection,
+};
 use rand::{prelude::*, rng};
 use slither::{
     CalculatedVelocity, CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, Floor,
     MovementCollisions, MovementConfig, MovingPlatform, RotatingPlatform, Slope, move_and_slide,
+    seegull::{
+        Euler, Follow, LookAt, Orbit, OrbitMode, Rotation, SeegullPlugin, SpringArm, ViewOffset,
+        ViewTransform,
+    },
     slide_on_floor, slide_on_wall, update_platform_velocity,
 };
 
@@ -16,11 +26,12 @@ fn main() -> AppExit {
             PhysicsPlugins::new(FixedPostUpdate),
             PhysicsDebugPlugin::new(FixedPostUpdate),
             CharacterMovementPlugin,
+            SeegullPlugin,
         ))
-        .add_systems(Startup, setup_player)
         .add_systems(
             Startup,
             (
+                setup_player,
                 setup_level,
                 setup_stairs,
                 setup_slopes,
@@ -28,7 +39,7 @@ fn main() -> AppExit {
                 setup_platforms,
             ),
         )
-        .add_systems(Update, (update_input, update_follow_camera))
+        .add_systems(Update, (update_input, update_player_rotation))
         .add_systems(
             FixedUpdate,
             (
@@ -120,61 +131,34 @@ fn setup_player(
         })
         .id();
 
-    commands
-        .spawn((
-            // CameraArm,
-            EulerRotation::default(),
-            FollowTarget {
-                target: player,
-                distance: 0.0,
-                speed: 10.0,
-            },
-            Transform {
-                translation: Vec3::Y * 2.0,
-                ..Default::default()
-            },
-        ))
-        .with_child((
-            Camera3d::default(),
-            Projection::Perspective(PerspectiveProjection {
-                fov: 80_f32.to_radians(),
-                ..Default::default()
-            }),
-            Transform {
-                translation: Vec3::new(0.0, 3.0, 10.0), // Camera distance.
-                ..Default::default()
-            },
-        ));
-}
-
-fn update_follow_camera(
-    mut followers: Query<(&mut Transform, &mut FollowTarget)>,
-    targets: Query<&Transform, Without<FollowTarget>>,
-    time: Res<Time>,
-) {
-    for (mut transform1, mut follow) in &mut followers {
-        let Ok(transform2) = targets.get(follow.target) else {
-            continue;
-        };
-
-        let delta = transform2.translation - transform1.translation;
-
-        let Ok((direction, distance)) = Dir3::new_and_length(delta) else {
-            continue;
-        };
-
-        if distance > follow.distance {
-            let excess = follow.distance - distance;
-            transform1.translation -= excess * follow.speed * time.delta_secs() * direction;
-        }
-
-        let target = transform1.translation.reject_from_normalized(Vec3::Y)
-            + transform2.translation.project_onto_normalized(Vec3::Y);
-
-        transform1
-            .translation
-            .smooth_nudge(&target, follow.speed, time.delta_secs());
-    }
+    commands.spawn((
+        ViewTransform::default(),
+        Follow {
+            entity: player,
+            offset: Vec3::new(0.0, 2.0, 0.0),
+            easing: 0.2,
+        },
+        Orbit {
+            offset: Vec3::new(0.0, 2.0, 10.0),
+            ..Default::default()
+        },
+        // LookAt {
+        //     entity: player,
+        //     offset: Vec3::ZERO,
+        //     easing: 0.1,
+        // },
+        SpringArm {
+            filter: SpatialQueryFilter::from_excluded_entities([player]),
+            radius: 1.0,
+            distance: 10.0,
+            easing: 0.5,
+        },
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: 70_f32.to_radians(),
+            ..Default::default()
+        }),
+    ));
 }
 
 fn setup_slopes(
@@ -357,7 +341,7 @@ fn update_input(
     key: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut players: Query<(&mut Transform, &mut MovementInput, &mut MovementMode), With<Player>>,
-    mut cameras: Query<(&mut Transform, &mut EulerRotation, &FollowTarget), Without<Player>>,
+    mut cameras: Query<&mut Orbit, Without<Player>>,
     time: Res<Time>,
 ) {
     if !mouse.pressed(MouseButton::Left) {
@@ -402,30 +386,52 @@ fn update_input(
         // transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
     }
 
-    for (mut follow_transform, mut rotation, follow) in &mut cameras {
-        rotation.pitch += mouse_delta.y * -0.01;
-        rotation.yaw += mouse_delta.x * -0.01;
+    for mut transform in &mut cameras {
+        // rotation.target.modify_euler(EulerRot::YXZ, |euler| {
+        // euler.pitch += mouse_delta.y * -0.01;
+        // euler.yaw += mouse_delta.x * -0.01;
+        // euler.add_pitch(mouse_delta.y * -0.01);
+        // euler.add_yaw(mouse_delta.x * -0.01);
+        // dbg!(euler);
+        // });
 
-        let EulerRotation { pitch, yaw, roll } = *rotation;
+        let euler = transform.rotation.euler_mut();
+        euler.pitch =
+            (euler.pitch + mouse_delta.y * -0.01).clamp(-89_f32.to_radians(), 89_f32.to_radians());
+        // euler.add_pitch(mouse_delta.y * -0.01);
+        euler.add_yaw(mouse_delta.x * -0.01);
 
-        follow_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
+        // let speed = speed / 10.0 * (move_axis.max_element() + mouse_delta.length());
 
-        let (mut player_transform, _, mode) = players.get_mut(follow.target).unwrap();
+        // let (player_transform, ..) = players.get(entity).unwrap();
+        // translation
+        //     .target
+        //     .smooth_nudge(&player_transform.translation, speed, time.delta_secs());
+        // translation.eye.smooth_nudge(
+        //     &(player_transform.translation + Vec3::new(0.0, 3.0, 10.0)),
+        //     speed,
+        //     time.delta_secs(),
+        // );
+    }
+}
 
-        match *mode {
+fn update_player_rotation(
+    mut players: Query<(&mut Transform, &MovementMode), With<Player>>,
+    views: Query<(&Transform, &Follow), Without<Player>>,
+) {
+    for (view_transform, &Follow { entity, .. }) in &views {
+        let (mut player_transform, movement_mode) = players.get_mut(entity).unwrap();
+
+        let mut euler = Euler::from_quat(EulerRot::YXZ, view_transform.rotation);
+        match movement_mode {
             MovementMode::Walking => {
-                player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, 0.0, 0.0);
+                euler.roll = 0.0;
+                euler.pitch = 0.0;
             }
-            MovementMode::Flying => {
-                player_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
-            }
+            MovementMode::Flying => {}
         }
 
-        follow_transform.translation.smooth_nudge(
-            &player_transform.translation,
-            mouse_delta.x.abs() + mouse_delta.y.abs(),
-            time.delta_secs(),
-        );
+        player_transform.rotation = euler.to_quat(EulerRot::YXZ);
     }
 }
 
@@ -509,9 +515,6 @@ fn update_movement(
         }
     }
 }
-
-#[derive(Component)]
-struct WallNormal(Dir3);
 
 fn clear_buffered_input(mut query: Query<&mut MovementInput>) {
     for mut input in &mut query {
