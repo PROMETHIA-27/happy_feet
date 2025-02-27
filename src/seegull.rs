@@ -1,10 +1,7 @@
-use std::{
-    f32::consts::{PI, TAU},
-    ops::Mul,
-};
+use std::f32::consts::{PI, TAU};
 
 use avian3d::prelude::*;
-use bevy::{asset::io::memory::Dir, prelude::*};
+use bevy::prelude::*;
 
 pub struct SeegullPlugin;
 
@@ -12,15 +9,7 @@ impl Plugin for SeegullPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                follow,
-                orbit,
-                look_at,
-                view_offset,
-                spring_arm,
-                update_transform,
-            )
-                .chain(),
+            (follow, orbit, look_at, spring_arm, update_transform).chain(),
         );
     }
 }
@@ -79,16 +68,6 @@ pub struct SpringArm {
     pub easing: f32,
     pub radius: f32,
     pub distance: f32,
-}
-
-#[derive(Component)]
-pub struct ViewOffset(pub Vec3);
-
-fn view_offset(mut query: Query<(&mut ViewTransform, &ViewOffset)>) {
-    for (mut view, &ViewOffset(offset)) in &mut query {
-        let offset = view.rotation * offset;
-        view.offset += offset;
-    }
 }
 
 fn follow(

@@ -1,22 +1,12 @@
 use std::{hash::Hash, ops::Range};
 
-use avian3d::{
-    math::{PI, TAU},
-    prelude::*,
-};
-use bevy::{
-    ecs::schedule::ScheduleLabel, input::mouse::MouseMotion, prelude::*,
-    render::camera::CameraProjection,
-};
+use avian3d::{math::PI, prelude::*};
+use bevy::{input::mouse::MouseMotion, prelude::*};
 use rand::{prelude::*, rng};
 use slither::{
-    CalculatedVelocity, CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, Floor,
-    MovementCollisions, MovementConfig, MovingPlatform, RotatingPlatform, Slope, move_and_slide,
-    seegull::{
-        Euler, Follow, LookAt, Orbit, OrbitMode, Rotation, SeegullPlugin, SpringArm, ViewOffset,
-        ViewTransform,
-    },
-    slide_on_floor, slide_on_wall, update_platform_velocity,
+    CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, MovementCollisions,
+    MovementConfig,
+    seegull::{Euler, Follow, Orbit, SeegullPlugin, SpringArm, ViewTransform},
 };
 
 fn main() -> AppExit {
@@ -42,12 +32,7 @@ fn main() -> AppExit {
         .add_systems(Update, (update_input, update_player_rotation))
         .add_systems(
             FixedUpdate,
-            (
-                update_platforms,
-                update_platform_velocity,
-                update_movement,
-                clear_buffered_input,
-            )
+            (update_movement, clear_buffered_input)
                 .before(CharacterMovementSystems)
                 .chain(),
         )
@@ -109,7 +94,8 @@ fn setup_player(
             MovementConfig {
                 skin_width: SKIN_WIDTH,
                 climb_up_walls: true,
-                floor_snap_distance: 0.1,
+                floor_snap_distance: 1.0,
+                depenetrate_iterations: 1,
                 ..Default::default()
             },
             MovementInput::default(),
@@ -271,26 +257,6 @@ fn setup_platforms(
     let height = 1.0;
     let width = 10.0;
     let origin = Vec3::new(0.0, 0.0, 25.0);
-    commands.spawn((
-        MovingPlatform {
-            start: origin,
-            end: origin + Vec3::Y * 10.0,
-            speed: 1.0,
-        },
-        RotatingPlatform {
-            axis: Dir3::Y,
-            speed: 1.0,
-        },
-        Transform {
-            translation: origin,
-            scale: Vec3::new(width, height, width),
-            ..Default::default()
-        },
-        RigidBody::Static,
-        Collider::from(cuboid),
-        Mesh3d(mesh.clone()),
-        MeshMaterial3d(material.clone()),
-    ));
 }
 
 fn setup_level(
@@ -316,24 +282,6 @@ fn setup_level(
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(100.0)))),
         MeshMaterial3d(materials.add(StandardMaterial::default())),
     ));
-}
-
-fn update_platforms(
-    mut query: Query<(&mut Transform, AnyOf<(&MovingPlatform, &RotatingPlatform)>)>,
-    time: Res<Time>,
-) {
-    for (mut transform, platform) in &mut query {
-        if let Some(platform) = platform.0 {
-            let pos = platform.start.lerp(
-                platform.end,
-                (time.elapsed_secs() * platform.speed).sin() / 2.0 + 0.5,
-            );
-            transform.translation = pos;
-        }
-        if let Some(platform) = platform.1 {
-            transform.rotate_axis(platform.axis, platform.speed * time.delta_secs());
-        }
-    }
 }
 
 fn update_input(
