@@ -2,12 +2,12 @@ use std::{hash::Hash, ops::Range};
 
 use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*};
-use rand::{prelude::*, rng};
-use slither::{
+use happy_feet::{
     CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, MovementCollisions,
     MovementConfig,
     seegull::{Euler, Follow, Orbit, SeegullPlugin, SpringArm, ViewTransform},
 };
+use rand::{prelude::*, rng};
 
 fn main() -> AppExit {
     App::new()
@@ -94,7 +94,8 @@ fn setup_player(
             MovementConfig {
                 skin_width: SKIN_WIDTH,
                 climb_up_walls: true,
-                floor_snap_distance: 1.0,
+                floor_snap_distance: 0.0,
+                max_step_height: 1.0,
                 depenetrate_iterations: 1,
                 ..Default::default()
             },
@@ -384,6 +385,7 @@ fn update_player_rotation(
 }
 
 fn update_movement(
+    key: Res<ButtonInput<KeyCode>>,
     mut query: Query<
         (
             &mut CharacterBody,
@@ -399,9 +401,13 @@ fn update_movement(
     const GRAVITY: f32 = 21.0;
 
     for (mut character, collisions, input, mode, transform) in &mut query {
-        let target_speed = match input.is_sprinting {
-            true => 35.0,
-            false => 15.0,
+        let target_speed = match (
+            key.pressed(KeyCode::ShiftLeft),
+            key.pressed(KeyCode::ControlLeft),
+        ) {
+            (true, false) => 35.0,
+            (false, true) => 5.0,
+            _ => 15.0,
         };
 
         match mode {

@@ -1,7 +1,6 @@
 use avian3d::{math::PI, parry::shape::TypedShape, prelude::*};
 use bevy::{
-    color::palettes::css::*,
-    ecs::{component::ComponentId, world::DeferredWorld},
+    color::palettes::css::{GREEN, RED},
     prelude::*,
 };
 use std::{fmt::Debug, mem};
@@ -129,22 +128,12 @@ pub enum Slope {
 
 impl Slope {
     #[track_caller]
-    pub fn new<N>(normal: N, up_direction: Dir3, max_floor_angle: f32) -> Self
-    where
-        N: TryInto<Dir3>,
-        <N as TryInto<bevy::prelude::Dir3>>::Error: Debug,
-    {
+    pub fn new(normal: Dir3, up_direction: Dir3, max_floor_angle: f32) -> Self {
         Self::new_and_angle(normal, up_direction, max_floor_angle).0
     }
 
     #[track_caller]
-    pub fn new_and_angle<N>(normal: N, up_direction: Dir3, max_floor_angle: f32) -> (Self, f32)
-    where
-        N: TryInto<Dir3>,
-        <N as TryInto<bevy::prelude::Dir3>>::Error: Debug,
-    {
-        let normal = normal.try_into().unwrap();
-
+    pub fn new_and_angle(normal: Dir3, up_direction: Dir3, max_floor_angle: f32) -> (Self, f32) {
         let angle = f32::acos(normal.dot(*up_direction));
 
         if angle - 0.01 > PI / 2.0 {
@@ -219,6 +208,7 @@ pub struct MovementConfig {
     pub preserve_speed_on_floor: bool,
     pub slide_iterations: usize,
     /// The maximum number of times we try to seperate the body from the environemtn.
+    /// It's recomended with at least 1 but greater values has an impact on performance.
     pub depenetrate_iterations: usize,
     /// The maximum number of times we try to find an optimal step position
     /// when hitting a wall.
@@ -315,7 +305,7 @@ fn move_and_collide(
 /// - `rotation`: The rotation of the character.
 /// - `config`: see [`MovementConfig`].
 ///
-/// ..and so on and so on..
+/// ..and so on and so on
 #[must_use]
 pub fn move_and_slide(
     previous_floor: Option<Floor>,
@@ -378,9 +368,6 @@ pub fn move_and_slide(
                 normal,
             });
 
-            // Might not be good idea, idk.
-            velocity = velocity.reject_from_normalized(*config.up_direction);
-
             // Slide on floor.
             remaining_motion = slide_on_floor(
                 remaining_motion,
@@ -440,6 +427,7 @@ pub fn move_and_slide(
                             rotation,
                             direction,
                             config.up_direction,
+                            config.skin_width,
                             config.max_step_height,
                             config.max_step_depth,
                             config.max_floor_angle,
@@ -481,7 +469,7 @@ pub fn move_and_slide(
         }
     }
 
-    // 3. Solve remaining overlaps.
+    // 3. Solve overlaps.
     let mut overlap_amount = 0.0;
 
     for _ in 0..config.depenetrate_iterations {
@@ -542,6 +530,7 @@ pub fn move_and_slide(
                                 rotation,
                                 direction,
                                 config.up_direction,
+                                config.skin_width,
                                 config.max_step_height,
                                 config.max_step_depth,
                                 config.max_floor_angle,
@@ -587,58 +576,21 @@ pub fn move_and_slide(
     // We skip this when there was no floor previously to avoid suddenly
     // snapping to the ground when falling off a ledge or after jumping.
     if previous_floor.is_some() && floor.is_none() {
-        let aabb = shape.aabb(Vec3::ZERO, rotation);
-        let half_height = aabb.size().dot(*config.up_direction) / 2.0;
-        let ray_length = half_height + config.skin_width + config.floor_snap_distance + 0.01;
-
-        spatial.shape_hits_callback(
-            &inflated_shape,
-            origin + applied_motion,
+        if let Some((new_floor, offset)) = snap_to_floor(
+            shape,
+            origin,
             rotation,
-            -config.up_direction,
-            &ShapeCastConfig {
-                max_distance: config.floor_snap_distance + 0.01,
-                target_distance: 0.0,
-                compute_contact_on_penetration: true,
-                ignore_origin_penetration: true,
-            },
+            config.up_direction,
+            config.skin_width,
+            config.floor_snap_distance,
+            config.max_floor_angle,
+            is_on_wall && config.climb_up_walls,
+            spatial,
             filter,
-            |hit| {
-                let normal = Dir3::new_unchecked(hit.normal1);
-                let slope = Slope::new(normal, config.up_direction, config.max_floor_angle);
-
-                if !slope.is_floor() {
-                    return true;
-                }
-
-                floor = Some(Floor {
-                    entity: hit.entity,
-                    normal,
-                });
-
-                // Don't snap when climbing up a wall.
-                if config.climb_up_walls && is_on_wall && config.up_direction.dot(velocity) > 0.0 {
-                    return false;
-                }
-
-                // Hack to make sure the floor is not blocked by a wall or something.
-                let Some(..) = spatial.cast_ray(
-                    origin + applied_motion,
-                    Dir3::new(hit.point1 - (origin + applied_motion)).unwrap(),
-                    ray_length,
-                    false,
-                    filter,
-                ) else {
-                    return true;
-                };
-
-                if hit.distance <= config.floor_snap_distance {
-                    applied_motion -= config.up_direction * hit.distance; // Snap to the floor.
-                }
-
-                false
-            },
-        );
+        ) {
+            floor = Some(new_floor);
+            applied_motion += offset;
+        }
     }
 
     MovementOutput {
@@ -651,12 +603,102 @@ pub fn move_and_slide(
     }
 }
 
+fn snap_to_floor(
+    shape: &Collider,
+    origin: Vec3,
+    rotation: Quat,
+    up_direction: Dir3,
+    skin_width: f32,
+    floor_snap_distance: f32,
+    max_floor_angle: f32,
+    is_climbing: bool,
+    spatial: &SpatialQuery,
+    filter: &SpatialQueryFilter,
+) -> Option<(Floor, Vec3)> {
+    let min_distance = 0.1;
+
+    let hit = spatial.cast_shape(
+        shape,
+        origin,
+        rotation,
+        -up_direction,
+        &ShapeCastConfig {
+            max_distance: f32::max(min_distance, floor_snap_distance) + skin_width,
+            target_distance: skin_width,
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: true,
+        },
+        filter,
+    )?;
+
+    let normal = Dir3::new_unchecked(hit.normal1);
+    let slope = Slope::new(normal, up_direction, max_floor_angle);
+
+    let mut floor = None;
+
+    if slope.is_floor() {
+        floor = Some(Floor {
+            entity: hit.entity,
+            normal,
+        });
+
+        if floor_snap_distance == 0.0 {
+            return floor.map(|f| (f, Vec3::ZERO));
+        }
+    }
+
+    let max_distance = match is_climbing {
+        true => min_distance,
+        false => f32::max(min_distance, floor_snap_distance),
+    };
+
+    let mut offset = Vec3::ZERO;
+
+    spatial.shape_hits_callback(
+        &inflate_shape(shape, skin_width),
+        origin,
+        rotation,
+        -up_direction,
+        &ShapeCastConfig {
+            max_distance,
+            target_distance: 0.0,
+            compute_contact_on_penetration: true,
+            ignore_origin_penetration: true,
+        },
+        filter,
+        |hit| {
+            let normal = Dir3::new_unchecked(hit.normal1);
+            let slope = Slope::new(normal, up_direction, max_floor_angle);
+
+            if !slope.is_floor() {
+                return true; // Continue checking.
+            }
+
+            floor = Some(Floor {
+                entity: hit.entity,
+                normal,
+            });
+
+            if hit.distance > floor_snap_distance {
+                return true; // Continue checking.
+            }
+
+            offset = -hit.distance * up_direction; // Snap to floor.
+
+            false // Stop checking once we found steppable floor.
+        },
+    );
+
+    floor.map(|f| (f, offset))
+}
+
 fn step_up_wall(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,
     direction: Dir3,
     up_direction: Dir3,
+    min_height: f32,
     max_height: f32,
     max_depth: f32,
     max_floor_angle: f32,
@@ -704,13 +746,16 @@ fn step_up_wall(
         };
 
         // We can't stand here.
-        if hit.distance == 0.0 {
-            wall_depth = depth;
-            continue;
+        if hit.distance == 0.0 || max_height - hit.distance < min_height {
+            break;
         }
 
         // Subtract a small amount from max_floor_angle to make sure floor snapping still works.
-        let slope = Slope::new(hit.normal1, up_direction, max_floor_angle - 0.05);
+        let slope = Slope::new(
+            Dir3::new_unchecked(hit.normal1),
+            up_direction,
+            max_floor_angle - 0.05,
+        );
 
         if slope.is_floor() {
             let incoming = -hit.distance * up_direction;

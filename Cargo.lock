@@ -2335,6 +2335,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "happy_feet"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
+ "rand 0.9.0",
+ "smallvec",
+]
+
+[[package]]
 name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3951,16 +3961,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "slither"
-version = "0.1.0"
-dependencies = [
- "avian3d",
- "bevy",
- "rand 0.9.0",
- "smallvec",
 ]
 
 [[package]]
