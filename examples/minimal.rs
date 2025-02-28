@@ -2,6 +2,7 @@ use std::{hash::Hash, ops::Range};
 
 use avian3d::{math::PI, prelude::*};
 use bevy::{input::mouse::MouseMotion, prelude::*};
+
 use happy_feet::{
     CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, MovementCollisions,
     MovementConfig,
@@ -90,15 +91,17 @@ fn setup_player(
     let player = commands
         .spawn((
             Player,
+            TranslationExtrapolation,
             CharacterBody::default(),
             MovementConfig {
                 skin_width: SKIN_WIDTH,
-                climb_up_walls: true,
+                climb_up_walls: false,
                 floor_snap_distance: 0.0,
-                max_step_height: 1.0,
-                depenetrate_iterations: 1,
+                max_step_height: 0.0,
+                depenetrate_iterations: 4,
                 ..Default::default()
             },
+            CollisionMargin(100.0),
             MovementInput::default(),
             MovementMode::Flying,
             RigidBody::Kinematic,
@@ -122,18 +125,13 @@ fn setup_player(
         ViewTransform::default(),
         Follow {
             entity: player,
-            offset: Vec3::new(0.0, 2.0, 0.0),
-            easing: 0.2,
+            offset: Vec3::new(0.0, 1.0, 0.0),
+            easing: 0.0,
         },
         Orbit {
-            offset: Vec3::new(0.0, 2.0, 10.0),
+            offset: Vec3::new(0.0, 1.0, 10.0),
             ..Default::default()
         },
-        // LookAt {
-        //     entity: player,
-        //     offset: Vec3::ZERO,
-        //     easing: 0.1,
-        // },
         SpringArm {
             filter: SpatialQueryFilter::from_excluded_entities([player]),
             radius: 1.0,
@@ -275,6 +273,15 @@ fn setup_level(
             rotation: Quat::from_rotation_x(-PI / 2.0),
             ..Default::default()
         },
+    ));
+
+    let cube = Cuboid::new(10.0, 10.0, 10.0);
+    commands.spawn((
+        RigidBody::Static,
+        Collider::from(cube),
+        Mesh3d(meshes.add(cube)),
+        MeshMaterial3d(materials.add(StandardMaterial::default())),
+        Transform::from_translation(Vec3::new(0.0, 0.0, -30.0)),
     ));
 
     commands.spawn((

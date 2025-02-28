@@ -1,8 +1,5 @@
 use avian3d::{math::PI, parry::shape::TypedShape, prelude::*};
-use bevy::{
-    color::palettes::css::{GREEN, RED},
-    prelude::*,
-};
+use bevy::{color::palettes::css::*, prelude::*};
 use std::{fmt::Debug, mem};
 
 pub mod seegull;
@@ -116,6 +113,35 @@ fn update_character_movement(
 
         character.floor = movement.floor;
         character.last_update_velocity = movement.applied_motion / time.delta_secs();
+    }
+}
+
+enum Plane {
+    Floor,
+    Slope,
+    Wall,
+    Roof,
+}
+
+impl Plane {
+    fn new(normal: Dir3, up_direction: Dir3) -> Self {
+        let d = normal.dot(*up_direction);
+
+        if d > 0.0 {
+            return match d < 1.0 {
+                true => Self::Slope,
+                false => Self::Floor,
+            };
+        }
+
+        if d < 0.0 {
+            return match d > -1.0 {
+                true => Self::Slope,
+                false => Self::Roof,
+            };
+        }
+
+        Self::Wall
     }
 }
 
@@ -257,16 +283,15 @@ pub struct MovementOutput {
 
 #[must_use]
 fn move_and_collide(
-    origin: Vec3,
-    motion: Vec3,
-    rotation: Quat,
-    skin_width: f32,
     shape: &Collider,
+    origin: Vec3,
+    rotation: Quat,
+    direction: Dir3,
+    length: f32,
+    skin_width: f32,
     spatial: &SpatialQuery,
     filter: &SpatialQueryFilter,
-) -> Option<(Dir3, f32, ShapeHitData)> {
-    let (direction, length) = Dir3::new_and_length(motion).ok()?;
-
+) -> Option<(Vec3, ShapeHitData)> {
     let hit = spatial.cast_shape(
         shape,
         origin,
@@ -281,7 +306,7 @@ fn move_and_collide(
         filter,
     )?;
 
-    Some((direction, hit.distance - skin_width, hit))
+    Some((direction * (hit.distance - skin_width), hit))
 }
 
 // FIXME:
@@ -320,6 +345,8 @@ pub fn move_and_slide(
     mut on_collide: impl FnMut(MovementCollision),
     gizmos: &mut Gizmos,
 ) -> MovementOutput {
+    let original_direction = Dir3::new(velocity).ok();
+
     let mut applied_motion = Vec3::ZERO;
     let mut remaining_motion = velocity * delta_secs;
 
@@ -331,24 +358,28 @@ pub fn move_and_slide(
 
     let mut overlaps_buffer = Vec::with_capacity(8);
 
+    // while remaining_motion.length_squared() > 1e-4 {}
+
     for _ in 0..config.slide_iterations {
+        let Ok((direction, length)) = Dir3::new_and_length(remaining_motion) else {
+            break;
+        };
+
         // 1. Sweep in the movement direction.
-        let Some((direction, distance, hit)) = move_and_collide(
-            origin + applied_motion,
-            remaining_motion,
-            rotation,
-            config.skin_width,
+        let Some((incoming, hit)) = move_and_collide(
             shape,
+            origin + applied_motion,
+            rotation,
+            direction,
+            length,
+            config.skin_width,
             spatial,
             filter,
         ) else {
             // If nothing was hit, apply the remaining motion.
             applied_motion += mem::take(&mut remaining_motion);
-
             break;
         };
-
-        let incoming = distance * direction;
 
         // Move as close to the geometry as possible.
         applied_motion += incoming;
@@ -458,6 +489,14 @@ pub fn move_and_slide(
                     config.up_direction,
                     previous_floor.is_none() || config.climb_up_walls,
                 );
+
+                // See Quake2: "If velocity is against original velocity, stop ead to avoid tiny oscilations in sloping corners."
+                if original_direction
+                    .map(|original_direction| remaining_motion.dot(*original_direction) <= 0.0)
+                    .unwrap_or(true)
+                {
+                    break;
+                }
 
                 velocity = slide_on_wall(
                     velocity,
@@ -576,6 +615,17 @@ pub fn move_and_slide(
     // We skip this when there was no floor previously to avoid suddenly
     // snapping to the ground when falling off a ledge or after jumping.
     if previous_floor.is_some() && floor.is_none() {
+        if let Some((incoming, hit)) = move_and_collide(
+            shape,
+            origin + applied_motion,
+            rotation,
+            -config.up_direction,
+            config.floor_snap_distance,
+            config.skin_width,
+            spatial,
+            filter,
+        ) {}
+
         if let Some((new_floor, offset)) = snap_to_floor(
             shape,
             origin,
