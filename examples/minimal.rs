@@ -97,6 +97,7 @@ fn setup(
         Character {
             skin_width: 0.1,
             walkable_angle: PI / 4.0 + 0.1,
+            ground_check_distance: 0.2,
             ..Default::default()
         },
         Collider::from(shape),
