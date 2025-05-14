@@ -1,530 +1,289 @@
-use std::{hash::Hash, ops::Range};
+use std::{f32::consts::PI, fmt::DebugMap};
 
-use avian3d::{math::PI, prelude::*};
-use bevy::{input::mouse::MouseMotion, prelude::*};
-
-use happy_feet::{
-    CharacterBody, CharacterMovementPlugin, CharacterMovementSystems, MovementCollisions,
-    MovementConfig,
-    seegull::{Euler, Follow, Orbit, SeegullPlugin, SpringArm, ViewTransform},
+use avian3d::prelude::*;
+use bevy::{
+    color::palettes::css::*,
+    prelude::*,
+    window::{CursorGrabMode, PrimaryWindow},
 };
-use rand::{prelude::*, rng};
+use bevy_enhanced_input::prelude::*;
+use bevy_skein::SkeinPlugin;
+use happy_feet::{
+    Character, CharacterDebugMode, CharacterMovement, KinematicCharacterPlugin, MoveInput,
+};
 
 fn main() -> AppExit {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            PhysicsPlugins::new(FixedPostUpdate),
-            PhysicsDebugPlugin::new(FixedPostUpdate),
-            CharacterMovementPlugin,
-            SeegullPlugin,
+            PhysicsPlugins::default(),
+            // PhysicsDebugPlugin::default(),
+            SkeinPlugin::default(),
+            KinematicCharacterPlugin,
+            EnhancedInputPlugin,
         ))
+        .insert_resource(AmbientLight {
+            color: ALICE_BLUE.into(),
+            brightness: 200.0,
+            ..Default::default()
+        })
+        .init_gizmo_group::<PhysicsGizmos>()
+        .add_input_context::<OnFoot>()
+        .add_observer(on_jump)
+        .add_observer(on_toggle_perspective)
+        .add_observer(on_toggle_debug_mode)
+        .add_systems(Startup, setup)
         .add_systems(
-            Startup,
+            Update,
             (
-                setup_player,
-                setup_level,
-                setup_stairs,
-                setup_slopes,
-                setup_rubble,
-                setup_platforms,
+                move_input,
+                look_input,
+                update_attachments,
+                update_camera_offset.after(update_attachments),
+                capture_mouse,
             ),
-        )
-        .add_systems(Update, (update_input, update_player_rotation))
-        .add_systems(
-            FixedUpdate,
-            (update_movement, clear_buffered_input)
-                .before(CharacterMovementSystems)
-                .chain(),
         )
         .run()
 }
 
-const SKIN_WIDTH: f32 = 0.2;
-
-#[derive(Component)]
-#[require(Transform)]
-struct CameraArm;
-
-#[derive(Component)]
-struct Player;
-
-#[derive(Component, Default)]
-struct MovementInput {
-    current: Vec3,
-    buffered: Vec3,
-    is_sprinting: bool,
-}
-
-impl MovementInput {
-    fn set(&mut self, value: Vec3) {
-        self.buffered += value;
-        self.current = value;
+fn capture_mouse(mut query: Query<&mut Window, Added<PrimaryWindow>>) {
+    for mut window in &mut query {
+        window.cursor_options.grab_mode = CursorGrabMode::Locked;
+        window.cursor_options.visible = false;
     }
 }
 
-#[derive(Component)]
-enum MovementMode {
-    Walking,
-    Flying,
-}
-
-#[derive(Component, Default, Clone, Copy)]
-struct EulerRotation {
-    pitch: f32,
-    yaw: f32,
-    roll: f32,
-}
-
-#[derive(Component)]
-struct FollowTarget {
-    target: Entity,
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+struct PlayerCamera {
+    eye_height: f32,
     distance: f32,
-    speed: f32,
 }
 
-fn setup_player(
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+#[relationship_target(relationship = AttachedTo)]
+struct Attachments(Vec<Entity>);
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+#[relationship(relationship_target = Attachments)]
+#[require(AttachmentPosition)]
+struct AttachedTo(Entity);
+
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+struct AttachmentPosition(Vec3);
+
+fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
-    let player = commands
-        .spawn((
-            Player,
-            TranslationExtrapolation,
-            CharacterBody::default(),
-            MovementConfig {
-                skin_width: SKIN_WIDTH,
-                climb_up_walls: false,
-                floor_snap_distance: 0.0,
-                max_step_height: 0.0,
-                depenetrate_iterations: 4,
-                ..Default::default()
-            },
-            CollisionMargin(100.0),
-            MovementInput::default(),
-            MovementMode::Flying,
-            RigidBody::Kinematic,
-            Collider::capsule(1.0, 2.0),
-            Transform {
-                translation: Vec3::Y * 10.0,
-                ..Default::default()
-            },
-            Mesh3d(meshes.add(Capsule3d::new(1.0, 2.0))),
-            MeshMaterial3d(materials.add(StandardMaterial::default())),
-        ))
-        .with_children(|player| {
-            player.spawn((
-                Collider::capsule(1.0 + SKIN_WIDTH, 2.0),
-                CollisionLayers::NONE,
-            ));
-        })
-        .id();
+    // let shape = Capsule3d::new(0.4, 1.0);
+    // let shape = Cone::new(0.4, 1.4);
+    let shape = Capsule3d::new(0.2, 1.0);
 
     commands.spawn((
-        ViewTransform::default(),
-        Follow {
-            entity: player,
-            offset: Vec3::new(0.0, 1.0, 0.0),
-            easing: 0.0,
-        },
-        Orbit {
-            offset: Vec3::new(0.0, 1.0, 10.0),
+        Name::new("Player"),
+        Character {
+            skin_width: 0.1,
+            walkable_angle: PI / 4.0 + 0.1,
             ..Default::default()
         },
-        SpringArm {
-            filter: SpatialQueryFilter::from_excluded_entities([player]),
-            radius: 1.0,
-            distance: 10.0,
-            easing: 0.5,
-        },
-        Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection {
-            fov: 70_f32.to_radians(),
+        Collider::from(shape),
+        Mesh3d(meshes.add(shape)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            base_color: WHITE.with_alpha(0.5).into(),
             ..Default::default()
-        }),
-    ));
-}
-
-fn setup_slopes(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let cuboid = Cuboid::from_length(1.0);
-    let mesh = meshes.add(cuboid);
-    let material = materials.add(StandardMaterial::default());
-
-    let height = 40.0;
-    let width = 10.0;
-    let origin = Vec3::new(-width * 2.5, -height / 2.0, -30.0);
-
-    for i in 1..5 {
-        let angle = i as f32 / PI;
-        let rotation = Quat::from_axis_angle(Vec3::X, angle);
-        let offset = Vec3::X * i as f32 * width;
-        commands.spawn((
-            Transform {
-                translation: origin + offset,
-                rotation,
-                scale: Vec3::new(width, height, height),
-                ..Default::default()
-            },
-            RigidBody::Static,
-            Collider::from(cuboid),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-        ));
-    }
-}
-
-fn setup_stairs(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let cuboid = Cuboid::from_length(1.0);
-    let mesh = meshes.add(cuboid);
-    let material = materials.add(StandardMaterial::default());
-
-    let depth = 4.0;
-    let width = 30.0;
-    let height_factor = 0.2;
-    let origin = Vec3::new(20.0 - depth, 0.0, 0.0);
-    for i in 1..9 {
-        let height = i as f32 * i as f32 * height_factor;
-        let offset = Vec3::X * i as f32 * depth + Vec3::Y * height / 2.0;
-        commands.spawn((
-            Transform {
-                translation: origin + offset,
-                scale: Vec3::new(depth, height, width),
-                ..Default::default()
-            },
-            RigidBody::Static,
-            Collider::from(cuboid),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-        ));
-    }
-}
-
-fn setup_rubble(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let mut rng = rng();
-    let cuboid = Cuboid::from_length(1.0);
-    let mesh = meshes.add(cuboid);
-    let material = materials.add(StandardMaterial::default());
-
-    let origin = Vec3::new(-50.0, 0.0, 0.0);
-    for _ in 0..200 {
-        let dist = rng.random_range(0.0_f32..1.0_f32).powi(2) * 30.0;
-        let angle = rng.random_range(-PI..PI);
-        let offset = Quat::from_rotation_y(angle) * (Vec3::X * dist);
-        let rotation = Quat::from_euler(
-            EulerRot::XYZ,
-            rng.random_range(-PI..PI),
-            rng.random_range(-PI..PI),
-            rng.random_range(-PI..PI),
-        );
-        let size = rng.random_range(0.1..10.0);
-        commands.spawn((
-            Transform {
-                translation: origin + offset,
-                rotation,
-                scale: Vec3::splat(size),
-            },
-            RigidBody::Static,
-            Collider::from(cuboid),
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-        ));
-    }
-}
-
-fn setup_platforms(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let cuboid = Cuboid::from_length(1.0);
-    let mesh = meshes.add(cuboid);
-    let material = materials.add(StandardMaterial::default());
-
-    let height = 1.0;
-    let width = 10.0;
-    let origin = Vec3::new(0.0, 0.0, 25.0);
-}
-
-fn setup_level(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    commands.spawn((
-        DirectionalLight {
-            illuminance: light_consts::lux::DARK_OVERCAST_DAY,
-            shadows_enabled: true,
-            ..Default::default()
-        },
+        })),
         Transform {
-            rotation: Quat::from_rotation_x(-PI / 2.0),
+            translation: Vec3::new(0.0, 10.0, 0.0),
+            rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },
+        default_actions(),
+        Attachments::spawn_one((
+            PlayerCamera {
+                eye_height: 0.5,
+                ..Default::default()
+            },
+            Projection::Perspective(PerspectiveProjection {
+                fov: 75.0_f32.to_radians(),
+                ..Default::default()
+            }),
+            Transform::from_xyz(0.0, 1.0, 10.0),
+            Camera3d::default(),
+        )),
     ));
 
-    let cube = Cuboid::new(10.0, 10.0, 10.0);
-    commands.spawn((
-        RigidBody::Static,
-        Collider::from(cube),
-        Mesh3d(meshes.add(cube)),
-        MeshMaterial3d(materials.add(StandardMaterial::default())),
-        Transform::from_translation(Vec3::new(0.0, 0.0, -30.0)),
-    ));
-
-    commands.spawn((
-        RigidBody::Static,
-        Collider::half_space(Vec3::Y),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(100.0)))),
-        MeshMaterial3d(materials.add(StandardMaterial::default())),
+    commands.spawn(SceneRoot(
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset("playground.gltf")),
     ));
 }
 
-fn update_input(
-    mut motion: EventReader<MouseMotion>,
-    key: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    mut players: Query<(&mut Transform, &mut MovementInput, &mut MovementMode), With<Player>>,
-    mut cameras: Query<&mut Orbit, Without<Player>>,
-    time: Res<Time>,
+#[derive(InputContext)]
+struct OnFoot;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = Vec3)]
+struct Move;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct Jump;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = Vec2)]
+struct Look;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct TogglePerspective;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct ToggleDebugMode;
+
+fn default_actions() -> Actions<OnFoot> {
+    let mut actions = Actions::default();
+
+    actions
+        .bind::<Move>()
+        .to(Cardinal::wasd_keys())
+        .with_modifiers((Negate::y(), SwizzleAxis::XZY));
+
+    actions
+        .bind::<Jump>()
+        .to(KeyCode::Space)
+        .with_conditions(JustPress::default());
+
+    actions
+        .bind::<Look>()
+        .to(Input::mouse_motion())
+        .with_modifiers((Scale::splat(-0.01), SwizzleAxis::YXZ));
+
+    actions
+        .bind::<TogglePerspective>()
+        .to(KeyCode::KeyC)
+        .with_conditions(JustPress::default());
+
+    actions
+        .bind::<ToggleDebugMode>()
+        .to(KeyCode::Tab)
+        .with_conditions(JustPress::default());
+
+    actions
+}
+
+fn on_toggle_debug_mode(
+    trigger: Trigger<Fired<ToggleDebugMode>>,
+    mut commands: Commands,
+    debug_modes: Query<Has<CharacterDebugMode>>,
 ) {
-    if !mouse.pressed(MouseButton::Left) {
-        motion.clear();
+    match debug_modes.get(trigger.target()).unwrap() {
+        true => commands
+            .entity(trigger.target())
+            .remove::<CharacterDebugMode>(),
+        false => commands.entity(trigger.target()).insert(CharacterDebugMode),
+    };
+}
+
+fn on_toggle_perspective(
+    trigger: Trigger<Fired<TogglePerspective>>,
+    targets: Query<&Attachments>,
+    mut cameras: Query<&mut PlayerCamera>,
+) -> Result {
+    let attachments = targets.get(trigger.target())?;
+
+    let mut iter = cameras.iter_many_mut(attachments.iter());
+
+    while let Some(mut player_camera) = iter.fetch_next() {
+        match player_camera.distance > 0.0 {
+            true => player_camera.distance = 0.0,
+            false => player_camera.distance = 8.0,
+        }
     }
 
-    let mouse_delta: Vec2 = motion.read().map(|m| m.delta).sum();
+    Ok(())
+}
 
-    let mut move_axis = button_axis_3d(
-        &key,
-        KeyCode::KeyA..KeyCode::KeyD,
-        KeyCode::KeyQ..KeyCode::KeyE,
-        KeyCode::KeyW..KeyCode::KeyS,
-    );
+fn on_jump(
+    trigger: Trigger<Fired<Jump>>,
+    mut query: Query<(&mut Character, &CharacterMovement)>,
+) -> Result {
+    let (mut character, movement) = query.get_mut(trigger.target())?;
+    character.jump(movement.jump_impulse);
+    Ok(())
+}
 
-    let pressed_jump = key.just_pressed(KeyCode::Space);
-    let holding_sprint = key.pressed(KeyCode::ShiftLeft);
-    let change_mode = key.just_pressed(KeyCode::Tab);
+fn move_input(
+    mut query: Query<(&mut MoveInput, &Actions<OnFoot>)>,
+    camera: Single<&GlobalTransform, With<PlayerCamera>>,
+) {
+    let mut camera_transform = camera.compute_transform();
+    camera_transform.align(Dir3::Y, Dir3::Y, Dir3::NEG_Z, camera_transform.forward());
 
-    for (mut transform, mut input, mut mode) in &mut players {
-        input.is_sprinting = holding_sprint;
+    for (mut input, actions) in &mut query {
+        let axis = actions.action::<Move>().value().as_axis3d();
 
-        if change_mode {
-            *mode = match *mode {
-                MovementMode::Walking => MovementMode::Flying,
-                MovementMode::Flying => MovementMode::Walking,
-            }
-        }
-
-        if let MovementMode::Walking = *mode {
-            if pressed_jump {
-                move_axis.y = 1.0;
-            } else {
-                move_axis.y = 0.0;
-            }
-        }
-
-        input.set(move_axis);
-
-        // let right = transform.right();
-        // transform.rotate(Quat::from_axis_angle(*right, mouse_delta.y * -0.01));
-        // transform.rotate(Quat::from_rotation_y(mouse_delta.x * -0.01));
-    }
-
-    for mut transform in &mut cameras {
-        // rotation.target.modify_euler(EulerRot::YXZ, |euler| {
-        // euler.pitch += mouse_delta.y * -0.01;
-        // euler.yaw += mouse_delta.x * -0.01;
-        // euler.add_pitch(mouse_delta.y * -0.01);
-        // euler.add_yaw(mouse_delta.x * -0.01);
-        // dbg!(euler);
-        // });
-
-        let euler = transform.rotation.euler_mut();
-        euler.pitch =
-            (euler.pitch + mouse_delta.y * -0.01).clamp(-89_f32.to_radians(), 89_f32.to_radians());
-        // euler.add_pitch(mouse_delta.y * -0.01);
-        euler.add_yaw(mouse_delta.x * -0.01);
-
-        // let speed = speed / 10.0 * (move_axis.max_element() + mouse_delta.length());
-
-        // let (player_transform, ..) = players.get(entity).unwrap();
-        // translation
-        //     .target
-        //     .smooth_nudge(&player_transform.translation, speed, time.delta_secs());
-        // translation.eye.smooth_nudge(
-        //     &(player_transform.translation + Vec3::new(0.0, 3.0, 10.0)),
-        //     speed,
-        //     time.delta_secs(),
-        // );
+        input.set(camera_transform.rotation * axis.normalize_or_zero());
     }
 }
 
-fn update_player_rotation(
-    mut players: Query<(&mut Transform, &MovementMode), With<Player>>,
-    views: Query<(&Transform, &Follow), Without<Player>>,
-) {
-    for (view_transform, &Follow { entity, .. }) in &views {
-        let (mut player_transform, movement_mode) = players.get_mut(entity).unwrap();
-
-        let mut euler = Euler::from_quat(EulerRot::YXZ, view_transform.rotation);
-        match movement_mode {
-            MovementMode::Walking => {
-                euler.roll = 0.0;
-                euler.pitch = 0.0;
-            }
-            MovementMode::Flying => {}
-        }
-
-        player_transform.rotation = euler.to_quat(EulerRot::YXZ);
-    }
-}
-
-fn update_movement(
-    key: Res<ButtonInput<KeyCode>>,
-    mut query: Query<
-        (
-            &mut CharacterBody,
-            &MovementCollisions,
-            &MovementInput,
-            &MovementMode,
-            &Transform,
-        ),
-        With<Player>,
-    >,
-    time: Res<Time>,
-) {
-    const GRAVITY: f32 = 21.0;
-
-    for (mut character, collisions, input, mode, transform) in &mut query {
-        let target_speed = match (
-            key.pressed(KeyCode::ShiftLeft),
-            key.pressed(KeyCode::ControlLeft),
-        ) {
-            (true, false) => 35.0,
-            (false, true) => 5.0,
-            _ => 15.0,
+fn look_input(
+    characters: Query<&Actions<OnFoot>>,
+    mut cameras: Query<(&mut Transform, &Projection, &AttachedTo)>,
+) -> Result {
+    for (mut camera_transform, projection, attached_to) in &mut cameras {
+        let &Projection::Perspective(PerspectiveProjection { fov, .. }) = projection else {
+            Err("expected perspective projection")?
         };
 
-        match mode {
-            MovementMode::Walking => {
-                if input.buffered.y > 0.0 {
-                    let jump_height = 4.0;
-                    let jump_accel = f32::sqrt(2.0 * GRAVITY * jump_height);
+        let actions = characters.get(attached_to.0)?;
 
-                    if character.floor.is_some() {
-                        character.velocity += jump_accel * Vec3::Y;
-                    } else if let Some(wall) = collisions.last() {
-                        character.velocity += jump_accel * wall.normal;
-                    }
+        let axis = actions.action::<Look>().value().as_axis2d() / fov;
 
-                    character.floor = None;
-                }
+        let (mut yaw, mut pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
 
-                if let Ok(direction) =
-                    Dir3::new((transform.rotation * input.buffered).reject_from_normalized(Vec3::Y))
-                {
-                    let max_acceleration = match character.floor.is_some() {
-                        true => 400.0,
-                        false => 20.0,
-                    };
+        let max_pitch = PI / 2.0 - 1e-4;
+        pitch = (pitch + axis.x).clamp(-max_pitch, max_pitch);
+        yaw += axis.y;
 
-                    let accel = acceleration(
-                        character.velocity,
-                        direction,
-                        max_acceleration,
-                        target_speed,
-                        time.delta_secs(),
-                    );
+        let rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
 
-                    character.acceleration += accel;
-                }
-
-                if character.floor.is_some() {
-                    let fric = friction(character.velocity, 10.0, time.delta_secs());
-                    character.velocity += fric;
-                } else {
-                    character.velocity -= GRAVITY * Vec3::Y * time.delta_secs();
-                }
-            }
-            MovementMode::Flying => {
-                if let Ok(direction) = Dir3::new(transform.rotation * input.buffered) {
-                    let accel = acceleration(
-                        character.velocity,
-                        direction,
-                        400.0,
-                        target_speed,
-                        time.delta_secs(),
-                    );
-                    character.velocity += accel;
-                }
-
-                let fric = friction(character.velocity, 10.0, time.delta_secs());
-                character.velocity += fric;
-            }
-        }
+        camera_transform.rotation = rotation;
     }
+
+    Ok(())
 }
 
-fn clear_buffered_input(mut query: Query<&mut MovementInput>) {
-    for mut input in &mut query {
-        input.buffered = Vec3::ZERO;
+fn update_camera_offset(
+    characters: Query<&Character>,
+    mut cameras: Query<(&mut Transform, &PlayerCamera, &AttachedTo)>,
+) -> Result {
+    for (mut camera_transform, player_camera, attached_to) in &mut cameras {
+        let character = characters.get(attached_to.0)?;
+
+        let mut offset = character.up * player_camera.eye_height;
+        offset += camera_transform.rotation * Vec3::Z * player_camera.distance;
+
+        camera_transform.translation += offset;
     }
+
+    Ok(())
 }
 
-fn button_axis<T>(input: &ButtonInput<T>, range: Range<T>) -> f32
-where
-    T: Hash + Eq + Copy + Send + Sync + 'static,
-{
-    match (input.pressed(range.start), input.pressed(range.end)) {
-        (true, false) => -1.0,
-        (false, true) => 1.0,
-        _ => 0.0,
+fn update_attachments(
+    mut query: Query<(&mut Transform, &AttachedTo)>,
+    targets: Query<&GlobalTransform>,
+) -> Result {
+    for (mut transform, attached_to) in &mut query {
+        let target_transform = targets.get(attached_to.0)?;
+        transform.translation = target_transform.translation();
     }
-}
 
-fn button_axis_3d<T>(input: &ButtonInput<T>, x: Range<T>, y: Range<T>, z: Range<T>) -> Vec3
-where
-    T: Hash + Eq + Copy + Send + Sync + 'static,
-{
-    Vec3 {
-        x: button_axis(input, x),
-        y: button_axis(input, y),
-        z: button_axis(input, z),
-    }
-}
-
-fn acceleration(
-    velocity: Vec3,
-    direction: Dir3,
-    max_acceleration: f32,
-    target_speed: f32,
-    delta: f32,
-) -> Vec3 {
-    // Current speed in the desired direction.
-    let current_speed = velocity.dot(*direction);
-
-    // No acceleration is needed if current speed exceeds target.
-    if current_speed >= target_speed {
-        return Vec3::ZERO;
-    }
-    // Clamp to avoid acceleration past the target speed.
-    let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
-    accel_speed * direction
-}
-
-fn friction(velocity: Vec3, friction: f32, delta: f32) -> Vec3 {
-    let length = velocity.length();
-    -velocity.normalize_or_zero() * f32::min(length, length * friction * delta)
+    Ok(())
 }
