@@ -373,28 +373,30 @@ pub(crate) fn character_movement(
                 &spatial_query,
                 &filter.0,
             ) {
-                new_ground = Some(ground);
+                if character.grounded() {
+                    new_ground = Some(ground);
 
-                let mut hit_roof = false;
+                    let mut hit_roof = false;
 
-                if ground_distance < 0.0 {
-                    if let Some(..) = sweep(
-                        collider,
-                        transform.translation,
-                        transform.rotation,
-                        character.up,
-                        -ground_distance,
-                        character.skin_width,
-                        &spatial_query,
-                        &filter.0,
-                        true,
-                    ) {
-                        hit_roof = true;
+                    if ground_distance < 0.0 {
+                        if let Some(..) = sweep(
+                            collider,
+                            transform.translation,
+                            transform.rotation,
+                            character.up,
+                            -ground_distance,
+                            character.skin_width,
+                            &spatial_query,
+                            &filter.0,
+                            true,
+                        ) {
+                            hit_roof = true;
+                        }
                     }
-                }
 
-                if !hit_roof {
-                    new_translation -= character.up * ground_distance;
+                    if !hit_roof {
+                        new_translation -= character.up * ground_distance;
+                    }
                 }
             } else {
                 new_ground = None;
