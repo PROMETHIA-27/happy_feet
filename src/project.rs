@@ -138,10 +138,14 @@ pub(crate) fn project_motion_on_ground(motion: Vec3, normal: impl TryInto<Dir3>,
         return vertical + horizontal;
     };
 
+    let horizontal_length = horizontal.length();
+
     // Project horizontal movement onto the calculated direction
     horizontal = horizontal.project_onto_normalized(*horizontal_direction);
 
-    (vertical + horizontal).normalize_or_zero() * motion.length()
+    horizontal = horizontal.normalize_or_zero() * horizontal_length;
+
+    vertical + horizontal
 }
 
 /// Projects a vector on a non-walkable plane.

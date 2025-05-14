@@ -9,7 +9,8 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterDebugMode, CharacterMovement, KinematicCharacterPlugin, MoveInput,
+    Character, CharacterMovement, KinematicCharacterPlugin, MoveInput,
+    debug::{DebugMode, DebugMotion},
 };
 
 fn main() -> AppExit {
@@ -34,10 +35,16 @@ fn main() -> AppExit {
         .add_observer(on_toggle_debug_mode)
         .add_systems(Startup, setup)
         .add_systems(
+            PreUpdate,
+            (move_input, look_input).after(EnhancedInputSystem),
+        )
+        // .add_systems(
+        //     RunFixedMainLoop,
+        //     (move_input, look_input).in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
+        // )
+        .add_systems(
             Update,
             (
-                move_input,
-                look_input,
                 update_attachments,
                 update_camera_offset.after(update_attachments),
                 capture_mouse,
@@ -181,13 +188,16 @@ fn default_actions() -> Actions<OnFoot> {
 fn on_toggle_debug_mode(
     trigger: Trigger<Fired<ToggleDebugMode>>,
     mut commands: Commands,
-    debug_modes: Query<Has<CharacterDebugMode>>,
+    debug_modes: Query<Has<DebugMode>>,
 ) {
     match debug_modes.get(trigger.target()).unwrap() {
         true => commands
             .entity(trigger.target())
-            .remove::<CharacterDebugMode>(),
-        false => commands.entity(trigger.target()).insert(CharacterDebugMode),
+            .remove::<DebugMode>()
+            .insert(DebugMotion::default()),
+        false => commands
+            .entity(trigger.target())
+            .insert((DebugMode, DebugMotion::default())),
     };
 }
 

@@ -1,12 +1,14 @@
 use std::f32::consts::PI;
 
 use avian3d::prelude::*;
-use bevy::{color::palettes::css::*, prelude::*};
+use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
+use debug::{DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
+use itertools::Itertools;
 use project::{SlidePlanes, project_motion_on_ground, project_motion_on_wall};
 use sweep::{MoveImpact, move_and_slide, sweep};
 
-pub(crate) mod debug;
+pub mod debug;
 pub(crate) mod ground;
 pub(crate) mod project;
 pub(crate) mod sweep;
@@ -16,6 +18,8 @@ pub struct KinematicCharacterPlugin;
 impl Plugin for KinematicCharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((debug::plugin,));
+
+        app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
 
         app.add_systems(
             FixedUpdate,
@@ -30,10 +34,6 @@ impl Plugin for KinematicCharacterPlugin {
         );
     }
 }
-
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
-pub struct CharacterDebugMode;
 
 pub(crate) fn update_character_filter(
     mut query: Query<(Entity, &mut CharacterFilter, &CollisionLayers)>,
@@ -69,18 +69,24 @@ pub(crate) fn character_forces(
     }
 }
 
+pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
+    for mut move_input in &mut query {
+        move_input.update();
+    }
+}
+
 pub(crate) fn movement_input(
     mut query: Query<(
-        &mut MoveInput,
+        &MoveInput,
         &mut MoveAcceleration,
         &Character,
         &CharacterMovement,
-        Has<CharacterDebugMode>,
+        Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
-    for (mut move_input, mut move_acceleration, character, movement, debug_mode) in &mut query {
-        let Ok((direction, throttle)) = Dir3::new_and_length(move_input.take()) else {
+    for (move_input, mut move_acceleration, character, movement, debug_mode) in &mut query {
+        let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
 
@@ -114,7 +120,7 @@ pub(crate) fn movement_acceleration(
         &CharacterFilter,
         &mut SlidePlanes,
         Has<Sensor>,
-        Has<CharacterDebugMode>,
+        Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
@@ -125,7 +131,7 @@ pub(crate) fn movement_acceleration(
         collider,
         filter,
         mut planes,
-        sensor,
+        is_sensor,
         debug_mode,
     ) in &mut query
     {
@@ -138,6 +144,11 @@ pub(crate) fn movement_acceleration(
 
         if debug_mode {
             character.velocity = move_accel;
+            continue;
+        }
+
+        if is_sensor {
+            character.velocity += move_accel;
             continue;
         }
 
@@ -204,7 +215,6 @@ pub(crate) fn movement_acceleration(
 }
 
 pub(crate) fn character_movement(
-    mut gizmos: Gizmos<PhysicsGizmos>,
     spatial_query: SpatialQuery,
     mut query: Query<(
         &mut Character,
@@ -213,16 +223,43 @@ pub(crate) fn character_movement(
         &CharacterFilter,
         &mut SlidePlanes,
         Has<Sensor>,
-        Has<CharacterDebugMode>,
+        Option<&mut DebugMotion>,
+        // Option<&mut DebugPoints>,
+        Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) -> Result {
-    for (mut character, mut transform, collider, filter, mut planes, sensor, debug_mode) in
-        &mut query
+    for (
+        mut character,
+        mut transform,
+        collider,
+        filter,
+        mut planes,
+        sensor,
+        mut debug_motion,
+        debug_mode,
+    ) in &mut query
     {
         if sensor {
             transform.translation += character.velocity * time.delta_secs();
             continue;
+        }
+
+        if debug_mode {
+            if let Some(lines) = debug_motion.as_mut() {
+                lines.push(
+                    0.0,
+                    DebugPoint {
+                        translation: transform.translation,
+                        velocity: character.velocity,
+                        hit: character.ground.map(|ground| DebugHit {
+                            point: transform.translation
+                                + character.feet_position(collider, transform.rotation),
+                            normal: *ground.normal,
+                        }),
+                    },
+                );
+            }
         }
 
         let mut new_ground = None;
@@ -236,8 +273,9 @@ pub(crate) fn character_movement(
             false => time.delta_secs(),
         };
 
-        let mut last_slide_translation = transform.translation;
-        let mut last_slide_color = VIOLET;
+        let Ok(original_direction) = Dir3::new(character.velocity) else {
+            continue;
+        };
 
         let out = move_and_slide(
             collider,
@@ -249,16 +287,7 @@ pub(crate) fn character_movement(
             &filter.0,
             &spatial_query,
             duration,
-            |state,
-             MoveImpact {
-                 hit,
-                 origin,
-                 direction,
-                 incoming,
-                 ..
-             }| {
-                last_slide_translation = transform.translation + state.offset;
-
+            |state, MoveImpact { hit, .. }| {
                 if let Some(ground) = Ground::new_if_walkable(
                     hit.entity,
                     hit.normal1,
@@ -268,27 +297,22 @@ pub(crate) fn character_movement(
                     new_ground = Some(ground);
                 }
 
-                let color = RED.mix(&VIOLET, state.remaining_time / duration);
-
-                gizmos.line_gradient(
-                    origin,
-                    origin + direction * incoming,
-                    last_slide_color,
-                    color,
-                );
-
-                last_slide_color = color;
-
                 planes.push(hit.normal1);
 
-                for normal in planes.normals() {
+                for (i, normal) in planes.normals().enumerate() {
                     if is_walkable(*normal, *character.up, character.walkable_angle) {
                         for velocity in &mut state.velocities {
-                            *velocity = project_motion_on_ground(*velocity, normal, character.up)
+                            *velocity = project_motion_on_ground(*velocity, normal, character.up);
                         }
                     } else {
                         for velocity in &mut state.velocities {
                             *velocity = velocity.reject_from_normalized(*normal);
+
+                            if i > 0 {
+                                let prev = planes.planes[i - 1];
+                                let crease = Dir3::new(normal.cross(*prev)).unwrap();
+                                *velocity = velocity.project_onto_normalized(*crease);
+                            }
                         }
                     }
                 }
@@ -300,27 +324,33 @@ pub(crate) fn character_movement(
                 }
 
                 if planes.is_corner() {
-                    character.velocity = Vec3::ZERO;
                     for velocity in &mut state.velocities {
                         *velocity = Vec3::ZERO;
                     }
                 }
 
-                let point = hit.point1 + hit.normal1 * 0.02;
+                for velocity in &mut state.velocities {
+                    if velocity.dot(*original_direction) < 0.0 {
+                        *velocity = Vec3::ZERO;
+                    }
+                }
 
-                gizmos.line_gradient(
-                    point,
-                    point + hit.normal1 * 0.2,
-                    WHITE.with_alpha(0.0),
-                    WHITE,
-                );
-
-                gizmos.line_gradient(
-                    point,
-                    point + state.velocities[0].normalize_or_zero() * 0.2,
-                    BLACK.with_alpha(0.0),
-                    BLACK,
-                );
+                if debug_mode {
+                    if let Some(lines) = debug_motion.as_mut() {
+                        let duration = duration - state.remaining_time;
+                        lines.push(
+                            duration,
+                            DebugPoint {
+                                translation: transform.translation + state.offset,
+                                velocity: state.velocities.iter().sum(),
+                                hit: Some(DebugHit {
+                                    point: hit.point1,
+                                    normal: hit.normal1,
+                                }),
+                            },
+                        );
+                    }
+                }
 
                 false
             },
@@ -329,9 +359,9 @@ pub(crate) fn character_movement(
         planes.clear();
 
         let mut new_translation = transform.translation + out.offset;
-        character.velocity = out.velocities.iter().sum();
+        let new_velocity = out.velocities.iter().sum();
 
-        if character.grounded() {
+        if character.grounded() || new_ground.is_some() {
             if let Some((ground_distance, ground)) = ground_check(
                 collider,
                 new_translation,
@@ -345,8 +375,10 @@ pub(crate) fn character_movement(
             ) {
                 new_ground = Some(ground);
 
-                let hit_roof = ground_distance < 0.0
-                    && sweep(
+                let mut hit_roof = false;
+
+                if ground_distance < 0.0 {
+                    if let Some(..) = sweep(
                         collider,
                         transform.translation,
                         transform.rotation,
@@ -356,33 +388,48 @@ pub(crate) fn character_movement(
                         &spatial_query,
                         &filter.0,
                         true,
-                    )
-                    .is_some();
+                    ) {
+                        hit_roof = true;
+                    }
+                }
 
                 if !hit_roof {
                     new_translation -= character.up * ground_distance;
                 }
+            } else {
+                new_ground = None;
             }
+        }
+
+        let draw_line = debug_mode
+            || debug_motion.as_ref().map_or(false, |lines| {
+                lines.points.back().map_or(true, |(_, point)| {
+                    point.translation.distance_squared(new_translation) > 0.5
+                })
+            });
+
+        if draw_line {
+            let lines = debug_motion.as_mut().unwrap();
+
+            lines.push(
+                out.remaining_time,
+                DebugPoint {
+                    translation: new_translation,
+                    velocity: new_velocity,
+                    hit: new_ground.map(|ground| DebugHit {
+                        point: new_translation
+                            + character.feet_position(collider, transform.rotation),
+                        normal: *ground.normal,
+                    }),
+                },
+            );
         }
 
         if !debug_mode {
             transform.translation = new_translation;
-        } else {
-            gizmos.line_gradient(
-                last_slide_translation,
-                new_translation,
-                last_slide_color,
-                ALICE_BLUE,
-            );
-            gizmos.draw_collider(
-                collider,
-                new_translation,
-                transform.rotation,
-                ALICE_BLUE.with_alpha(0.2).into(),
-            );
+            character.velocity = new_velocity;
+            character.ground = new_ground;
         }
-
-        character.ground = new_ground;
     }
 
     Ok(())
@@ -399,6 +446,7 @@ pub(crate) fn character_movement(
     MoveAcceleration,
     SlidePlanes,
     // SteppingBehaviour,
+    DebugMotion,
 )]
 pub struct Character {
     pub velocity: Vec3,
@@ -460,6 +508,12 @@ impl Character {
     pub fn grounded(&self) -> bool {
         self.ground.is_some()
     }
+
+    pub fn feet_position(&self, shape: &Collider, rotation: Quat) -> Vec3 {
+        let aabb = shape.aabb(Vec3::ZERO, rotation);
+        let down = aabb.min.dot(*self.up) - self.skin_width;
+        self.up * down
+    }
 }
 
 /// The next movement acceleration of the character
@@ -512,7 +566,7 @@ pub struct MoveInput {
 }
 
 impl MoveInput {
-    pub fn take(&mut self) -> Vec3 {
+    pub fn update(&mut self) -> Vec3 {
         self.previous = std::mem::take(&mut self.value);
         self.previous
     }

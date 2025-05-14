@@ -113,6 +113,8 @@ pub(crate) fn move_and_slide<const SIZE: usize>(
 
         state.remaining_time *= 1.0 - distance / max_distance;
 
+        assert!(state.remaining_time >= 0.0);
+
         state.offset += direction * distance;
 
         if !on_hit(
