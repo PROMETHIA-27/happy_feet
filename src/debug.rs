@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, f32::consts::PI, ops::Mul};
 
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
@@ -160,18 +160,24 @@ fn draw_debug_motion(
     )>,
 ) {
     for (character, movement, collider, transform, mut debug_motion, debug_mode) in &mut query {
-        let line_color = |t, velocity: Vec3| {
-            let vertical = velocity.project_onto_normalized(*character.up);
-            let horizontal = velocity - vertical;
-
+        let line_color = |t: f32, velocity: Vec3| {
             let target_speed_sq = movement.target_speed * movement.target_speed;
 
-            let h = horizontal.length_squared() / target_speed_sq;
-            let v = vertical.length_squared() / target_speed_sq;
+            let mut color = Hsla::from(MIDNIGHT_BLUE).mix(
+                &Hsla::from(CRIMSON),
+                velocity.length_squared() / target_speed_sq,
+            );
 
-            let color = VIOLET.mix(&LIGHT_BLUE, h).mix(&CRIMSON, v);
+            let extra = (velocity.length_squared() - target_speed_sq).max(0.0);
 
-            color.with_alpha(t)
+            color = color
+                .mix(&Hsla::from(YELLOW), (extra / 200.0).powf(0.2).min(1.0))
+                .mix(&Hsla::from(WHITE), (extra / 600.0).powf(0.2).min(1.0));
+
+            match debug_mode {
+                true => color,
+                false => color.with_alpha(t.powf(2.0)),
+            }
         };
 
         // lines

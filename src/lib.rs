@@ -437,11 +437,18 @@ pub(crate) fn character_movement(
     Ok(())
 }
 
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+pub(crate) struct CharacterVelocity {
+    pub movement: Vec3,
+    pub physics: Vec3,
+}
+
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component)]
 #[require(
     RigidBody = RigidBody::Kinematic,
-    Collider = Capsule3d::new(0.3, 1.0),
+    Collider = Capsule3d::new(0.4, 1.0),
     CharacterFilter,
     CharacterMovement,
     MoveInput,
