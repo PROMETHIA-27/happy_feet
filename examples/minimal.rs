@@ -90,8 +90,8 @@ fn setup(
 ) {
     // let shape = Capsule3d::new(0.4, 1.0);
     // let shape = Cone::new(0.4, 1.4);
-    // let shape = Capsule3d::new(0.2, 1.0);
-    let shape = Cylinder::new(0.2, 1.0);
+    let shape = Capsule3d::new(0.2, 1.0);
+    // let shape = Cylinder::new(0.2, 1.0);
 
     commands.spawn((
         Name::new("Player"),

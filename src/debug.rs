@@ -14,7 +14,7 @@ pub(crate) fn plugin(app: &mut App) {
                 joints: GizmoLineJoint::Bevel,
                 ..Default::default()
             },
-            depth_bias: -0.5,
+            depth_bias: -0.02,
             ..Default::default()
         },
     );
@@ -26,7 +26,7 @@ pub(crate) fn plugin(app: &mut App) {
 }
 
 #[derive(GizmoConfigGroup, Reflect, Default)]
-struct CharacterGizmos;
+pub(crate) struct CharacterGizmos;
 
 fn draw_input_acceleration(
     mut gizmos: Gizmos<CharacterGizmos>,
@@ -165,14 +165,13 @@ fn draw_debug_motion(
 
             let mut color = Hsla::from(MIDNIGHT_BLUE).mix(
                 &Hsla::from(CRIMSON),
-                velocity.length_squared() / target_speed_sq,
+                (velocity.length_squared() / target_speed_sq).min(1.0),
             );
 
             let extra = (velocity.length_squared() - target_speed_sq).max(0.0);
 
-            color = color
-                .mix(&Hsla::from(YELLOW), (extra / 200.0).powf(0.2).min(1.0))
-                .mix(&Hsla::from(WHITE), (extra / 600.0).powf(0.2).min(1.0));
+            let fac = (extra / target_speed_sq / 10.0).min(1.0);
+            color = color.mix(&Hsla::from(WHEAT), fac);
 
             match debug_mode {
                 true => color,

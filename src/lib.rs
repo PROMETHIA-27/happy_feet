@@ -2,11 +2,11 @@ use std::f32::consts::PI;
 
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
-use debug::{DebugHit, DebugMode, DebugMotion, DebugPoint};
+use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
 use itertools::Itertools;
 use project::{SlidePlanes, project_motion_on_ground, project_motion_on_wall};
-use sweep::{MoveImpact, move_and_slide, sweep};
+use sweep::{MoveImpact, character_sweep, ledge_check, move_and_slide, step_check};
 
 pub mod debug;
 pub(crate) mod ground;
@@ -28,9 +28,16 @@ impl Plugin for KinematicCharacterPlugin {
                 update_character_filter,
                 movement_input,
                 movement_acceleration,
-                character_movement,
             )
                 .chain(),
+        );
+
+        app.add_systems(
+            PhysicsSchedule,
+            (
+                // character_depenetrate.in_set(NarrowPhaseSet::Update),
+                character_movement.in_set(PhysicsStepSet::Last),
+            ),
         );
     }
 }
@@ -152,8 +159,8 @@ pub(crate) fn movement_acceleration(
             continue;
         }
 
-        // character.velocity += move_accel;
-        // continue;
+        character.velocity += move_accel;
+        continue;
 
         // Sweep in the movement direction to find a plane to project acceleration on
         // This is a seperate step because trying to do this in the `move_and_slide` callback
@@ -214,7 +221,70 @@ pub(crate) fn movement_acceleration(
     }
 }
 
+// FIXME: doesn't work
+pub(crate) fn character_depenetrate(
+    collisions: Collisions,
+    mut query: Query<(Entity, &mut Character, &mut Transform)>,
+) {
+    for (entity, mut character, mut transform) in &mut query {
+        for contacts in collisions
+            .collisions_with(entity)
+            .filter(|c| !c.is_sensor())
+        {
+            assert!(contacts.body1.is_some() && contacts.body2.is_some());
+
+            let is_first = contacts.body1 == Some(entity);
+
+            let hit_entity = match is_first {
+                true => contacts.body2.unwrap(),
+                false => contacts.body1.unwrap(),
+            };
+
+            for manifold in &contacts.manifolds {
+                // let Some(contact) = manifold.find_deepest_contact() else {
+                //     continue;
+                // };
+
+                let hit_normal = match is_first {
+                    true => -manifold.normal,
+                    false => manifold.normal,
+                };
+
+                let stable_on_hit =
+                    is_walkable(hit_normal, *character.up, character.walkable_angle);
+
+                let stable_ground = character.ground.map(|g| *g.normal);
+
+                let obstruction_normal =
+                    obstruction_normal(stable_ground, hit_normal, stable_on_hit, *character.up);
+
+                character.velocity = project_velocity(
+                    character.velocity,
+                    stable_ground,
+                    *character.up,
+                    obstruction_normal,
+                    stable_on_hit,
+                );
+
+                if stable_on_hit {
+                    character.ground = Some(Ground {
+                        entity: hit_entity,
+                        normal: Dir3::new(hit_normal).unwrap(),
+                    });
+                }
+
+                for contact in &manifold.points {
+                    if contact.penetration > 0.0 {
+                        transform.translation += obstruction_normal * contact.penetration;
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn character_movement(
+    mut gizmos: Gizmos<CharacterGizmos>,
     spatial_query: SpatialQuery,
     mut query: Query<(
         &mut Character,
@@ -264,10 +334,6 @@ pub(crate) fn character_movement(
 
         let mut new_ground = None;
 
-        if let Some(ground) = character.ground {
-            planes.push(ground.normal);
-        }
-
         let duration = match debug_mode {
             true => 1.0,
             false => time.delta_secs(),
@@ -276,6 +342,10 @@ pub(crate) fn character_movement(
         let Ok(original_direction) = Dir3::new(character.velocity) else {
             continue;
         };
+
+        let mut plane_index = 0;
+        let mut previous_hit_normal = None;
+        let mut previous_velocity = character.velocity;
 
         let out = move_and_slide(
             collider,
@@ -287,7 +357,192 @@ pub(crate) fn character_movement(
             &filter.0,
             &spatial_query,
             duration,
-            |state, MoveImpact { hit, .. }| {
+            |state,
+             MoveImpact {
+                 hit,
+                 end,
+                 direction,
+                 remaining,
+                 ..
+             }| {
+                let velocity_before_projection = state.velocities[0];
+                let current_ground = character.ground.map(|g| *g.normal);
+
+                let hit_is_walkable =
+                    is_walkable(hit.normal1, *character.up, character.walkable_angle);
+                let obstruction_normal =
+                    obstruction_normal(current_ground, hit.normal1, hit_is_walkable, *character.up);
+
+                if !hit_is_walkable {
+                    if let Some((offset, hit)) = step_check(
+                        &mut gizmos,
+                        collider,
+                        transform.translation,
+                        transform.rotation,
+                        direction,
+                        character.up,
+                        character.walkable_angle,
+                        remaining,
+                        10.0,
+                        2.0,
+                        character.skin_width,
+                        &spatial_query,
+                        &filter.0,
+                    ) {
+                        new_ground = Some(Ground {
+                            entity: hit.entity,
+                            normal: hit.normal1.try_into().unwrap(),
+                        });
+
+                        state.offset += offset;
+                    }
+                }
+
+                // if !hit_is_walkable {
+                //     let mut step_height = 2.0;
+
+                //     // fid max up
+                //     if let Some((distance, _)) = character_sweep(
+                //         collider,
+                //         end,
+                //         transform.rotation,
+                //         character.up,
+                //         step_height,
+                //         character.skin_width,
+                //         &spatial_query,
+                //         &filter.0,
+                //         false,
+                //     ) {
+                //         step_height = distance;
+                //     }
+
+                //     let step_up = character.up * step_height;
+                //     let mut step_forward = direction * remaining;
+
+                //     // find max forward
+                //     if let Some((distance, _)) = character_sweep(
+                //         collider,
+                //         end + step_up,
+                //         transform.rotation,
+                //         direction,
+                //         step_forward.length(),
+                //         character.skin_width,
+                //         &spatial_query,
+                //         &filter.0,
+                //         false,
+                //     ) {
+                //         step_forward = direction * distance;
+                //     }
+
+                //     if step_forward.length() > 1e-4 {
+                //         if let Some((distance, hit)) = character_sweep(
+                //             collider,
+                //             end + step_up + step_forward,
+                //             transform.rotation,
+                //             -character.up,
+                //             step_height,
+                //             character.skin_width,
+                //             &spatial_query,
+                //             &filter.0,
+                //             true,
+                //         ) {
+                //             let step_down = -character.up * distance;
+                //             let feet =
+                //                 step_down + character.feet_position(collider, transform.rotation);
+
+                //             let step_is_walkable =
+                //                 is_walkable(hit.normal1, *character.up, character.walkable_angle);
+
+                //             gizmos.line(
+                //                 end + step_up + step_forward,
+                //                 end + step_up + step_forward + feet,
+                //                 match step_is_walkable {
+                //                     true => LIGHT_GREEN,
+                //                     false => CRIMSON,
+                //                 },
+                //             );
+
+                //             if step_is_walkable {
+                //                 new_ground = Some(Ground {
+                //                     entity: hit.entity,
+                //                     normal: Dir3::new(hit.normal1).unwrap(),
+                //                 });
+                //                 state.offset += step_up + step_forward + step_down;
+                //                 state.remaining_time =
+                //                     (state.remaining_time - step_forward.length()).max(0.0);
+                //                 return false;
+                //             }
+                //         }
+                //     }
+
+                //     let mut i = 0;
+                //     while i < 32 {
+                //         i += 1;
+
+                //         step_forward += direction * 0.05;
+
+                //         if let Some((distance, _)) = character_sweep(
+                //             collider,
+                //             end + step_up,
+                //             transform.rotation,
+                //             direction,
+                //             step_forward.length(),
+                //             character.skin_width,
+                //             &spatial_query,
+                //             &filter.0,
+                //             false,
+                //         ) {
+                //             if distance <= 1e-4 {
+                //                 break;
+                //             }
+
+                //             step_forward = direction * distance;
+                //             i = 32;
+                //         }
+
+                //         if let Some((distance, hit)) = character_sweep(
+                //             collider,
+                //             end + step_up + step_forward,
+                //             transform.rotation,
+                //             -character.up,
+                //             step_height,
+                //             character.skin_width,
+                //             &spatial_query,
+                //             &filter.0,
+                //             true,
+                //         ) {
+                //             let step_down = -character.up * distance;
+                //             let feet =
+                //                 step_down + character.feet_position(collider, transform.rotation);
+
+                //             let step_is_walkable =
+                //                 is_walkable(hit.normal1, *character.up, character.walkable_angle);
+
+                //             gizmos.line(
+                //                 end + step_up + step_forward,
+                //                 end + step_up + step_forward + feet,
+                //                 match step_is_walkable {
+                //                     true => LIGHT_GREEN,
+                //                     false => CRIMSON,
+                //                 },
+                //             );
+
+                //             if step_is_walkable {
+                //                 new_ground = Some(Ground {
+                //                     entity: hit.entity,
+                //                     normal: Dir3::new(hit.normal1).unwrap(),
+                //                 });
+                //                 state.offset += step_up + step_forward + step_down;
+                //                 state.remaining_time =
+                //                     (state.remaining_time - step_forward.length()).max(0.0);
+
+                //                 return false;
+                //             }
+                //         }
+                //     }
+                //     dbg!(i);
+                // }
+
                 if let Some(ground) = Ground::new_if_walkable(
                     hit.entity,
                     hit.normal1,
@@ -295,45 +550,75 @@ pub(crate) fn character_movement(
                     character.walkable_angle,
                 ) {
                     new_ground = Some(ground);
-                }
 
-                planes.push(hit.normal1);
+                    state.velocities[0] = project_velocity(
+                        state.velocities[0],
+                        current_ground,
+                        *character.up,
+                        obstruction_normal,
+                        hit_is_walkable,
+                    );
+                } else {
+                    match plane_index {
+                        // initial
+                        0 => {
+                            plane_index = 1;
 
-                for (i, normal) in planes.normals().enumerate() {
-                    if is_walkable(*normal, *character.up, character.walkable_angle) {
-                        for velocity in &mut state.velocities {
-                            *velocity = project_motion_on_ground(*velocity, normal, character.up);
+                            state.velocities[0] = project_velocity(
+                                state.velocities[0],
+                                current_ground,
+                                *character.up,
+                                obstruction_normal,
+                                hit_is_walkable,
+                            );
                         }
-                    } else {
-                        for velocity in &mut state.velocities {
-                            *velocity = velocity.reject_from_normalized(*normal);
+                        // found blocking plane
+                        1 => {
+                            let previous_hit_normal = previous_hit_normal.unwrap();
+                            let previous_hit_is_stable = is_walkable(
+                                previous_hit_normal,
+                                *character.up,
+                                character.walkable_angle,
+                            );
 
-                            if i > 0 {
-                                let prev = planes.planes[i - 1];
-                                let crease = Dir3::new(normal.cross(*prev)).unwrap();
-                                *velocity = velocity.project_onto_normalized(*crease);
+                            if let Some(crease) = evaluate_crease(
+                                state.velocities[0],
+                                previous_velocity,
+                                hit.normal1,
+                                previous_hit_normal,
+                                hit_is_walkable,
+                                previous_hit_is_stable,
+                                character.grounded(),
+                            ) {
+                                if character.grounded() {
+                                    plane_index = 3;
+                                    state.velocities[0] = Vec3::ZERO;
+                                } else {
+                                    plane_index = 2;
+                                    state.velocities[0] = state.velocities[0].project_onto(crease);
+                                }
+                            } else {
+                                state.velocities[0] = project_velocity(
+                                    state.velocities[0],
+                                    current_ground,
+                                    *character.up,
+                                    obstruction_normal,
+                                    hit_is_walkable,
+                                );
                             }
                         }
+                        // found blocking crease
+                        2 => {
+                            plane_index = 3;
+                            state.velocities[0] = Vec3::ZERO;
+                        }
+                        // found blocking corner
+                        _ => {}
                     }
                 }
 
-                for crease in planes.creases() {
-                    for velocity in &mut state.velocities {
-                        *velocity = velocity.project_onto_normalized(*crease);
-                    }
-                }
-
-                if planes.is_corner() {
-                    for velocity in &mut state.velocities {
-                        *velocity = Vec3::ZERO;
-                    }
-                }
-
-                for velocity in &mut state.velocities {
-                    if velocity.dot(*original_direction) < 0.0 {
-                        *velocity = Vec3::ZERO;
-                    }
-                }
+                previous_hit_normal = Some(hit.normal1);
+                previous_velocity = velocity_before_projection;
 
                 if debug_mode {
                     if let Some(lines) = debug_motion.as_mut() {
@@ -356,10 +641,19 @@ pub(crate) fn character_movement(
             },
         );
 
-        planes.clear();
+        // match plane_index {
+        //     0 => {}
+        //     1 => println!("found blocking plane"),
+        //     2 => println!("found blocking crease"),
+        //     _ => println!("found blocking corner"),
+        // }
 
         let mut new_translation = transform.translation + out.offset;
         let new_velocity = out.velocities.iter().sum();
+
+        if !character.grounded() && character.velocity.dot(*character.up) > 1e-4 {
+            new_ground = None;
+        }
 
         if character.grounded() || new_ground.is_some() {
             if let Some((ground_distance, ground)) = ground_check(
@@ -379,7 +673,7 @@ pub(crate) fn character_movement(
                     let mut hit_roof = false;
 
                     if ground_distance < 0.0 {
-                        if let Some(..) = sweep(
+                        if let Some(..) = character_sweep(
                             collider,
                             transform.translation,
                             transform.rotation,
@@ -437,11 +731,127 @@ pub(crate) fn character_movement(
     Ok(())
 }
 
-#[derive(Component, Reflect, Default, Debug)]
-#[reflect(Component)]
-pub(crate) struct CharacterVelocity {
-    pub movement: Vec3,
-    pub physics: Vec3,
+fn evaluate_crease(
+    current_velocity: Vec3,
+    previous_velocity: Vec3,
+    current_hit_normal: Vec3,
+    previous_hit_normal: Vec3,
+    current_hit_is_stable: bool,
+    previous_hit_is_stable: bool,
+    ground_is_stable: bool,
+) -> Option<Vec3> {
+    if ground_is_stable && current_hit_is_stable && previous_hit_is_stable {
+        return None;
+    }
+
+    // Avoid calculations if the two planes are the same
+    if current_hit_normal.dot(previous_hit_normal) > 1.0 - 1e-3 {
+        return None;
+    }
+
+    let mut crease_direction = current_hit_normal
+        .cross(previous_hit_normal)
+        .normalize_or_zero();
+
+    let current_normal_on_crease_plane = current_hit_normal
+        .reject_from(crease_direction)
+        .normalize_or_zero();
+    let previous_normal_on_crease_plane = previous_hit_normal
+        .reject_from(crease_direction)
+        .normalize_or_zero();
+
+    let entering_velocity_on_crease_plane = previous_velocity.reject_from(crease_direction);
+
+    let dot_planes_on_crease_planes = current_normal_on_crease_plane.dot(previous_hit_normal);
+
+    if dot_planes_on_crease_planes
+        <= (entering_velocity_on_crease_plane.dot(-current_normal_on_crease_plane) + 1e-3)
+        && dot_planes_on_crease_planes
+            <= (entering_velocity_on_crease_plane.dot(-previous_normal_on_crease_plane) + 1e-3)
+    {
+        // Flip crease direction to make it representative of the real direction our velocity would be projected to
+        if crease_direction.dot(current_velocity) < 0.0 {
+            crease_direction = -crease_direction;
+        }
+
+        return Some(crease_direction);
+    }
+
+    None
+}
+
+fn obstruction_normal(
+    current_ground: Option<Vec3>,
+    hit_normal: Vec3,
+    hit_is_walkable: bool,
+    up: Vec3,
+) -> Vec3 {
+    if !hit_is_walkable {
+        if let Some(ground_normal) = current_ground {
+            let ground_left = ground_normal.cross(hit_normal).normalize_or_zero();
+            return ground_left.cross(up).normalize_or_zero();
+        }
+    }
+
+    hit_normal
+}
+
+fn project_velocity(
+    mut velocity: Vec3,
+    current_ground: Option<Vec3>,
+    up: Vec3,
+    obstruction_normal: Vec3,
+    stable_on_hit: bool,
+) -> Vec3 {
+    if let Some(ground_normal) = current_ground {
+        if stable_on_hit {
+            // On stable slopes, simply reorient the movement without any loss
+            velocity = aligned_with_surface(velocity, obstruction_normal, up);
+        } else {
+            // On blocking hits, project the movement on the obstruction while following the grounding plane
+            let ground_right = obstruction_normal.cross(ground_normal).normalize_or_zero();
+            let ground_up = ground_right.cross(obstruction_normal).normalize_or_zero();
+            velocity = aligned_with_surface(velocity, ground_up, up);
+            velocity = velocity.reject_from(obstruction_normal)
+        }
+    } else {
+        if stable_on_hit {
+            // Handle stable landing
+            velocity = velocity.reject_from(up);
+            velocity = aligned_with_surface(velocity, obstruction_normal, up);
+        } else {
+            // Handle generic obstruction
+            velocity = velocity.reject_from(obstruction_normal);
+        }
+    }
+
+    velocity
+}
+
+trait MovementHandler {
+    fn project_velocity();
+}
+
+pub(crate) enum SweepState {
+    None,
+    Plane,
+    Crease { previous_normal: Dir3 },
+    Corner,
+}
+
+fn aligned_with_surface(vector: Vec3, normal: Vec3, up: Vec3) -> Vec3 {
+    direction_aligned_with_surface(vector, normal, up) * vector.length()
+}
+
+fn direction_aligned_with_surface(vector: Vec3, normal: Vec3, up: Vec3) -> Vec3 {
+    let right = vector.cross(up);
+    normal.cross(right).normalize_or_zero()
+}
+
+pub(crate) struct GroundSettings {
+    layers: LayerMask,
+    max_angle: f32,
+    max_distance: f32,
 }
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
@@ -475,7 +885,7 @@ impl Default for Character {
         Self {
             velocity: Vec3::ZERO,
             up: Dir3::Y,
-            skin_width: 0.01,
+            skin_width: 0.02,
             max_slide_count: 8,
             ground: None,
             previous_ground: None,
@@ -493,7 +903,7 @@ impl Character {
         if let Some(ground) = self.ground {
             // Clear grounded if launched away from the ground
             if ground.normal.dot(impulse) > 0.0 {
-                self.previous_ground = self.ground.take();
+                self.ground = None;
             }
         }
 
@@ -502,9 +912,15 @@ impl Character {
 
     /// Launch the character on the `up` axis, overriding the downward velocity.
     pub fn jump(&mut self, impulse: f32) {
-        // Override downward velocity
-        let down = self.velocity.dot(*self.up).min(0.0);
-        self.launch(self.up * impulse + self.up * -down);
+        // Remove vertical velocity
+        self.velocity = self.velocity.reject_from(*self.up);
+
+        // Push the character away from ramps
+        if let Some(ground) = self.ground.take() {
+            self.velocity -= ground.normal * self.velocity.dot(*ground.normal);
+        }
+
+        self.velocity += self.up * impulse;
     }
 
     /// Set the current ground and update the prevoius ground with the old value

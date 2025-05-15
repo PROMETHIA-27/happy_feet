@@ -1,7 +1,7 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::sweep;
+use crate::{character_sweep, sweep};
 
 /// Represents the ground a character is currently standing on.
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
@@ -45,7 +45,7 @@ pub(crate) fn ground_check(
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
 ) -> Option<(f32, Ground)> {
-    let (distance, hit) = sweep(
+    let (distance, hit) = character_sweep(
         collider,
         translation,
         rotation,
