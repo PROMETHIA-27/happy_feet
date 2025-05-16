@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::{f32::consts::PI, ops::Range};
 
 use avian3d::prelude::*;
 use bevy::{
-    color::palettes::css::{BLACK, RED, WHITE},
+    color::palettes::css::{BLACK, CRIMSON, LIGHT_GREEN, RED, WHITE},
     prelude::*,
 };
 
@@ -52,15 +52,14 @@ pub(crate) fn step_check(
     direction: Dir3,
     up: Dir3,
     walkable_angle: f32,
-    mut min_forward: f32,
+    mut step_forward: f32,
     mut max_forward: f32,
+    min_height: f32,
     mut max_height: f32,
     skin_width: f32,
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
 ) -> Option<(Vec3, ShapeHitData)> {
-    const STEP_SIZE: f32 = 0.2;
-
     // check for roof
     if let Some((distance, _)) = character_sweep(
         shape,
@@ -95,23 +94,47 @@ pub(crate) fn step_check(
         max_forward = distance;
     }
 
-    if max_forward < min_forward {
-        min_forward = max_forward;
-    }
-
     gizmos.line(
         origin + up_offset,
-        origin + up_offset + direction * min_forward,
+        origin + up_offset + direction * max_forward,
         BLACK,
     );
 
+    step_forward = step_forward.min(max_forward);
+    let forward_offset = direction * step_forward;
+
+    // check for base step
+    if let Some((distance, hit)) = character_sweep(
+        shape,
+        origin + up_offset + forward_offset,
+        rotation,
+        -up,
+        max_height - min_height,
+        skin_width,
+        spatial_query,
+        filter,
+        true,
+    ) {
+        let is_walkable = is_walkable(hit.normal1, *up, walkable_angle - 1e-4);
+        if is_walkable {
+            let down_offset = -up * distance;
+            return Some((up_offset + forward_offset + down_offset, hit));
+        }
+    }
+
+    // start at beginning otherwise
+    step_forward = 0.0;
+
     // loop check for floor
-    let mut least_forward = None;
-    let mut step_forward = min_forward;
+    let mut least_forward = 0.0;
+    let mut most_forward = None;
 
     let mut result = None;
 
-    for _ in 0..32 {
+    let max_steps = 8;
+    let step_size = max_forward / max_steps as f32;
+
+    for _ in 0..8 {
         if step_forward > max_forward {
             break;
         }
@@ -123,7 +146,7 @@ pub(crate) fn step_check(
             origin + up_offset + forward_offset,
             rotation,
             -up,
-            max_height,
+            max_height - min_height,
             skin_width,
             spatial_query,
             filter,
@@ -131,36 +154,37 @@ pub(crate) fn step_check(
         ) {
             let down_offset = -up * distance;
 
+            let is_walkable = is_walkable(hit.normal1, *up, walkable_angle - 1e-4);
+
+            // let is_steppable = is_walkable && max_height - distance > 0.01;
+
             gizmos.line(
                 origin + up_offset + forward_offset,
                 origin + up_offset + forward_offset + down_offset,
-                RED,
+                match is_walkable {
+                    true => LIGHT_GREEN,
+                    false => CRIMSON,
+                },
             );
 
-            if is_walkable(hit.normal1, *up, walkable_angle - 1e-4) {
+            if is_walkable {
                 result = Some((up_offset + forward_offset + down_offset, hit));
-                match least_forward {
-                    Some(least_forward) => {
-                        step_forward = (least_forward + step_forward) / 2.0;
-                    }
-                    None => {
-                        least_forward = Some(step_forward);
-                    }
-                }
+                most_forward = Some(step_forward);
+                step_forward = (step_forward + least_forward) / 2.0;
+                continue;
             } else {
-                match least_forward {
-                    Some(least_forward) => {
-                        step_forward = (least_forward + step_forward) / 2.0;
-                    }
-                    None => {
-                        step_forward += STEP_SIZE;
-                    }
+                least_forward = step_forward;
+                if let Some(most_forward) = most_forward {
+                    step_forward = (step_forward + most_forward) / 2.0;
+                    continue;
                 }
             }
         }
+
+        step_forward += step_size;
     }
 
-    None
+    result
 }
 
 pub(crate) fn ledge_check(

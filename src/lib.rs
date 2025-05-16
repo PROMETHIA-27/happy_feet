@@ -377,13 +377,14 @@ pub(crate) fn character_movement(
                     if let Some((offset, hit)) = step_check(
                         &mut gizmos,
                         collider,
-                        transform.translation,
+                        transform.translation + state.offset,
                         transform.rotation,
                         direction,
                         character.up,
                         character.walkable_angle,
                         remaining,
-                        10.0,
+                        2.0,
+                        0.1,
                         2.0,
                         character.skin_width,
                         &spatial_query,
@@ -395,153 +396,10 @@ pub(crate) fn character_movement(
                         });
 
                         state.offset += offset;
+
+                        return false;
                     }
                 }
-
-                // if !hit_is_walkable {
-                //     let mut step_height = 2.0;
-
-                //     // fid max up
-                //     if let Some((distance, _)) = character_sweep(
-                //         collider,
-                //         end,
-                //         transform.rotation,
-                //         character.up,
-                //         step_height,
-                //         character.skin_width,
-                //         &spatial_query,
-                //         &filter.0,
-                //         false,
-                //     ) {
-                //         step_height = distance;
-                //     }
-
-                //     let step_up = character.up * step_height;
-                //     let mut step_forward = direction * remaining;
-
-                //     // find max forward
-                //     if let Some((distance, _)) = character_sweep(
-                //         collider,
-                //         end + step_up,
-                //         transform.rotation,
-                //         direction,
-                //         step_forward.length(),
-                //         character.skin_width,
-                //         &spatial_query,
-                //         &filter.0,
-                //         false,
-                //     ) {
-                //         step_forward = direction * distance;
-                //     }
-
-                //     if step_forward.length() > 1e-4 {
-                //         if let Some((distance, hit)) = character_sweep(
-                //             collider,
-                //             end + step_up + step_forward,
-                //             transform.rotation,
-                //             -character.up,
-                //             step_height,
-                //             character.skin_width,
-                //             &spatial_query,
-                //             &filter.0,
-                //             true,
-                //         ) {
-                //             let step_down = -character.up * distance;
-                //             let feet =
-                //                 step_down + character.feet_position(collider, transform.rotation);
-
-                //             let step_is_walkable =
-                //                 is_walkable(hit.normal1, *character.up, character.walkable_angle);
-
-                //             gizmos.line(
-                //                 end + step_up + step_forward,
-                //                 end + step_up + step_forward + feet,
-                //                 match step_is_walkable {
-                //                     true => LIGHT_GREEN,
-                //                     false => CRIMSON,
-                //                 },
-                //             );
-
-                //             if step_is_walkable {
-                //                 new_ground = Some(Ground {
-                //                     entity: hit.entity,
-                //                     normal: Dir3::new(hit.normal1).unwrap(),
-                //                 });
-                //                 state.offset += step_up + step_forward + step_down;
-                //                 state.remaining_time =
-                //                     (state.remaining_time - step_forward.length()).max(0.0);
-                //                 return false;
-                //             }
-                //         }
-                //     }
-
-                //     let mut i = 0;
-                //     while i < 32 {
-                //         i += 1;
-
-                //         step_forward += direction * 0.05;
-
-                //         if let Some((distance, _)) = character_sweep(
-                //             collider,
-                //             end + step_up,
-                //             transform.rotation,
-                //             direction,
-                //             step_forward.length(),
-                //             character.skin_width,
-                //             &spatial_query,
-                //             &filter.0,
-                //             false,
-                //         ) {
-                //             if distance <= 1e-4 {
-                //                 break;
-                //             }
-
-                //             step_forward = direction * distance;
-                //             i = 32;
-                //         }
-
-                //         if let Some((distance, hit)) = character_sweep(
-                //             collider,
-                //             end + step_up + step_forward,
-                //             transform.rotation,
-                //             -character.up,
-                //             step_height,
-                //             character.skin_width,
-                //             &spatial_query,
-                //             &filter.0,
-                //             true,
-                //         ) {
-                //             let step_down = -character.up * distance;
-                //             let feet =
-                //                 step_down + character.feet_position(collider, transform.rotation);
-
-                //             let step_is_walkable =
-                //                 is_walkable(hit.normal1, *character.up, character.walkable_angle);
-
-                //             gizmos.line(
-                //                 end + step_up + step_forward,
-                //                 end + step_up + step_forward + feet,
-                //                 match step_is_walkable {
-                //                     true => LIGHT_GREEN,
-                //                     false => CRIMSON,
-                //                 },
-                //             );
-
-                //             if step_is_walkable {
-                //                 new_ground = Some(Ground {
-                //                     entity: hit.entity,
-                //                     normal: Dir3::new(hit.normal1).unwrap(),
-                //                 });
-                //                 state.offset += step_up + step_forward + step_down;
-                //                 state.remaining_time =
-                //                     (state.remaining_time - step_forward.length()).max(0.0);
-
-                //                 return false;
-                //             }
-                //         }
-                //     }
-                //     dbg!(i);
-                // }
 
                 if let Some(ground) = Ground::new_if_walkable(
                     hit.entity,
