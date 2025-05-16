@@ -10,7 +10,7 @@ use bevy::{
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
 use projection::{CollisionState, SurfacePlane};
-use sweep::{CollideImpact, collide_and_slide, step_check, sweep};
+use sweep::{MovementImpact, collide_and_slide, step_check, sweep};
 
 pub mod debug;
 pub(crate) mod ground;
@@ -523,7 +523,7 @@ pub(crate) fn move_character(
                 )
             },
             |state,
-             CollideImpact {
+             MovementImpact {
                  hit,
                  end,
                  direction,
@@ -702,7 +702,6 @@ pub(crate) struct GroundSettings {
     CharacterMovement,
     MoveInput,
     MoveAcceleration,
-    // SteppingBehaviour,
     DebugMotion,
 )]
 pub struct Character {

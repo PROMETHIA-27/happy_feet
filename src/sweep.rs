@@ -176,62 +176,6 @@ pub(crate) fn step_check(
     result
 }
 
-pub(crate) fn ledge_check(
-    gizmos: &mut Gizmos<CharacterGizmos>,
-    up: Dir3,
-    walkable_angle: f32,
-    hit_point: Vec3,
-    hit_normal: Vec3,
-    spatial_query: &SpatialQuery,
-    filter: &SpatialQueryFilter,
-) -> Option<RayHitData> {
-    const VERTICAL_OFFSET: f32 = 0.02;
-    const HORIZONTAL_OFFSET: f32 = 0.02;
-    const LEDGE_CHECK_DISTANCE: f32 = 0.05;
-
-    let horizontal_hit_direction = hit_normal.reject_from(*up).normalize_or_zero();
-
-    let mut ledge_hit = None;
-
-    let inner_origin =
-        hit_point + up * VERTICAL_OFFSET + horizontal_hit_direction * HORIZONTAL_OFFSET;
-    let outer_origin =
-        hit_point + up * VERTICAL_OFFSET - horizontal_hit_direction * HORIZONTAL_OFFSET;
-    let max_distance = VERTICAL_OFFSET + LEDGE_CHECK_DISTANCE;
-
-    gizmos.line(inner_origin, outer_origin, WHITE);
-
-    if let Some(inner_hit) = spatial_query.cast_ray(inner_origin, -up, max_distance, false, filter)
-    {
-        if is_walkable(inner_hit.normal, *up, walkable_angle) {
-            ledge_hit = Some(inner_hit);
-            gizmos.line(
-                inner_origin - up * inner_hit.distance,
-                inner_origin - up * (inner_hit.distance - 0.5),
-                RED,
-            );
-        }
-    }
-
-    if let Some(outer_hit) = spatial_query.cast_ray(outer_origin, -up, max_distance, false, filter)
-    {
-        let inner_walkable = is_walkable(outer_hit.normal, *up, walkable_angle);
-        if inner_walkable {
-            gizmos.line(
-                outer_origin - up * outer_hit.distance,
-                outer_origin - up * (outer_hit.distance - 0.5),
-                RED,
-            );
-        }
-
-        if inner_walkable && ledge_hit.take().is_none() {
-            ledge_hit = Some(outer_hit);
-        }
-    }
-
-    ledge_hit
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct MovementState {
     pub velocity: Vec3,
@@ -240,7 +184,7 @@ pub(crate) struct MovementState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CollideImpact {
+pub(crate) struct MovementImpact {
     pub start: Vec3,
     pub end: Vec3,
     pub direction: Dir3,
@@ -250,12 +194,7 @@ pub(crate) struct CollideImpact {
     pub hit: ShapeHitData,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MoveAndSlideResult {
-    pub offset: Vec3,
-    pub velocity: Vec3,
-}
-
+/// If `on_hit` returns `true`, `project_velocity` will be called and the state velocity will be modified, otherwise it will be skipped.
 pub(crate) fn collide_and_slide(
     shape: &Collider,
     origin: Vec3,
@@ -270,7 +209,7 @@ pub(crate) fn collide_and_slide(
     spatial_query: &SpatialQuery,
     delta: f32,
     mut project_velocity: impl FnMut(Vec3, SurfacePlane) -> Vec3,
-    mut on_hit: impl FnMut(&mut MovementState, CollideImpact) -> bool,
+    mut on_hit: impl FnMut(&mut MovementState, MovementImpact) -> bool,
 ) -> MovementState {
     let mut state = MovementState {
         velocity,
@@ -308,16 +247,14 @@ pub(crate) fn collide_and_slide(
         };
 
         state.remaining_time *= 1.0 - distance / max_distance;
-
         state.offset += direction * distance;
 
         let end = origin + state.offset;
-
         let plane = SurfacePlane::new(hit.normal1, ground_normal, walkable_angle, up);
 
         if !on_hit(
             &mut state,
-            CollideImpact {
+            MovementImpact {
                 start,
                 end,
                 direction,
@@ -335,7 +272,6 @@ pub(crate) fn collide_and_slide(
             state.velocity,
             mem::replace(&mut previous_velocity, state.velocity),
             ground_normal,
-            up,
             |vel| project_velocity(vel, plane),
         );
     }

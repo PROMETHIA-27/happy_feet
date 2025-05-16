@@ -93,58 +93,18 @@ impl CollisionState {
         ground_normal: Option<Vec3>,
         up: Dir3,
     ) -> Vec3 {
-        // if plane.is_walkable {
-        //     return plane.project_velocity(velocity, ground_normal, up);
-        // }
-
-        // match *self {
-        //     CollisionState::Initial => {
-        //         *self = Self::Plane(plane);
-        //         plane.project_velocity(velocity, ground_normal, up)
-        //     }
-        //     CollisionState::Plane(previous_plane) => {
-        //         if let Some(crease) = get_crease(
-        //             &plane,
-        //             &previous_plane,
-        //             velocity,
-        //             previous_velocity,
-        //             ground_normal.is_some(),
-        //         ) {
-        //             if ground_normal.is_some() {
-        //                 *self = Self::Stop;
-        //                 Vec3::ZERO
-        //             } else {
-        //                 *self = Self::Crease;
-        //                 velocity.project_onto(crease)
-        //             }
-        //         } else {
-        //             *self = Self::Plane(plane);
-        //             plane.project_velocity(velocity, ground_normal, up)
-        //         }
-        //     }
-        //     CollisionState::Crease => {
-        //         *self = Self::Stop;
-        //         Vec3::ZERO
-        //     }
-        //     CollisionState::Stop => Vec3::ZERO,
-        // }
-        self.slide_with(
-            plane,
-            velocity,
-            previous_velocity,
-            ground_normal,
-            up,
-            |vel| plane.project_velocity(vel, ground_normal, up),
-        )
+        self.slide_with(plane, velocity, previous_velocity, ground_normal, |vel| {
+            plane.project_velocity(vel, ground_normal, up)
+        })
     }
 
+    #[must_use]
     pub fn slide_with(
         &mut self,
         plane: SurfacePlane,
         velocity: Vec3,
         previous_velocity: Vec3,
         ground_normal: Option<Vec3>,
-        up: Dir3,
         mut project_velocity: impl FnMut(Vec3) -> Vec3,
     ) -> Vec3 {
         if plane.is_walkable {
