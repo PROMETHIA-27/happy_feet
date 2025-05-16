@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, ops::Range};
+use std::{f32::consts::PI, mem, ops::Range};
 
 use avian3d::prelude::*;
 use bevy::{
@@ -6,7 +6,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::{CharacterGizmos, is_walkable, project::SlidePlanes};
+use crate::{CharacterGizmos, CollisionState, SurfacePlane, is_walkable};
 
 /// Result of the move_and_slide function.
 
@@ -233,7 +233,7 @@ pub(crate) fn ledge_check(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MoveAndSlideState {
+pub(crate) struct MovementState {
     pub velocity: Vec3,
     pub offset: Vec3,
     pub remaining_time: f32,
@@ -246,6 +246,7 @@ pub(crate) struct CollideImpact {
     pub direction: Dir3,
     pub incoming_motion: f32,
     pub remaining_motion: f32,
+    pub plane: SurfacePlane,
     pub hit: ShapeHitData,
 }
 
@@ -260,24 +261,26 @@ pub(crate) fn collide_and_slide(
     origin: Vec3,
     rotation: Quat,
     velocity: Vec3,
+    ground_normal: Option<Vec3>,
+    walkable_angle: f32,
+    up: Dir3,
     max_slide_count: usize,
     skin_width: f32,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
-    mut on_hit: impl FnMut(&mut MoveAndSlideState, CollideImpact) -> bool,
-) -> MoveAndSlideState {
-    let mut state = MoveAndSlideState {
+    mut project_velocity: impl FnMut(Vec3, SurfacePlane) -> Vec3,
+    mut on_hit: impl FnMut(&mut MovementState, CollideImpact) -> bool,
+) -> MovementState {
+    let mut state = MovementState {
         velocity,
         offset: Vec3::ZERO,
         remaining_time: delta,
     };
 
-    let Ok(original_direction) = Dir3::new(state.velocity) else {
-        return state;
-    };
+    let mut previous_velocity = state.velocity;
 
-    let mut planes = SlidePlanes::default();
+    let mut collision_state = CollisionState::default();
 
     for _ in 0..max_slide_count {
         let Ok((direction, max_distance)) =
@@ -306,11 +309,11 @@ pub(crate) fn collide_and_slide(
 
         state.remaining_time *= 1.0 - distance / max_distance;
 
-        assert!(state.remaining_time >= 0.0);
-
         state.offset += direction * distance;
 
         let end = origin + state.offset;
+
+        let plane = SurfacePlane::new(hit.normal1, ground_normal, walkable_angle, up);
 
         if !on_hit(
             &mut state,
@@ -320,23 +323,21 @@ pub(crate) fn collide_and_slide(
                 direction,
                 incoming_motion: distance,
                 remaining_motion: max_distance - distance,
+                plane,
                 hit,
             },
         ) {
             continue;
         }
 
-        todo!()
-
-        // if planes.push(hit.normal1) {
-        //     for velocity in &mut state.velocity {
-        //         *velocity = planes.project_velocity(*velocity, original_direction);
-
-        //         if velocity.dot(*original_direction) <= 0.0 {
-        //             *velocity = Vec3::ZERO;
-        //         }
-        //     }
-        // }
+        state.velocity = collision_state.slide_with(
+            plane,
+            state.velocity,
+            mem::replace(&mut previous_velocity, state.velocity),
+            ground_normal,
+            up,
+            |vel| project_velocity(vel, plane),
+        );
     }
 
     state

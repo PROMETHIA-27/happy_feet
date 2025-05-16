@@ -3,7 +3,7 @@ use std::{collections::VecDeque, f32::consts::PI, ops::Mul};
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
 
-use crate::{Character, CharacterMovement, MoveInput, is_walkable};
+use crate::{Character, CharacterMovement, MoveInput, is_walkable, move_character};
 
 pub(crate) fn plugin(app: &mut App) {
     app.insert_gizmo_config(
@@ -21,14 +21,14 @@ pub(crate) fn plugin(app: &mut App) {
 
     app.add_systems(
         FixedPostUpdate,
-        (draw_input_acceleration, draw_debug_motion),
+        (draw_input_arrow, draw_debug_motion).after(move_character),
     );
 }
 
 #[derive(GizmoConfigGroup, Reflect, Default)]
 pub(crate) struct CharacterGizmos;
 
-fn draw_input_acceleration(
+fn draw_input_arrow(
     mut gizmos: Gizmos<CharacterGizmos>,
     query: Query<(
         &Transform,
@@ -43,26 +43,6 @@ fn draw_input_acceleration(
             .aabb(Vec3::ZERO, transform.rotation)
             .size()
             .dot(character.up * 0.5);
-
-        // let vertical_velocity = character.velocity.project_onto_normalized(*character.up);
-        // let horizontal_verlocity = character.velocity - vertical_velocity;
-
-        // if let Ok((direction, speed)) = Dir3::new_and_length(horizontal_verlocity) {
-        //     let speed_len = speed / movement.target_speed;
-        //     let clamped_speed_len = speed_len.min(1.0);
-        //     let rest_speed_len = speed_len - clamped_speed_len;
-
-        //     let origin = transform.translation - character.up * half_height;
-
-        //     gizmos.line(origin, origin + direction * clamped_speed_len, YELLOW);
-
-        //     gizmos.line_gradient(
-        //         origin + *direction,
-        //         origin + direction * (1.0 + rest_speed_len),
-        //         YELLOW,
-        //         RED,
-        //     );
-        // }
 
         if let Ok(direction) = Dir3::new(move_input.previous()) {
             let speed_len = character.velocity.dot(*direction) / movement.target_speed;
@@ -186,7 +166,7 @@ fn draw_debug_motion(
             let (_, a) = debug_motion.points[i];
 
             points.push((
-                a.translation,
+                a.translation + character.feet_position(collider, transform.rotation) / 1.5,
                 line_color(
                     debug_motion.duration_at(i) / debug_motion.duration,
                     a.velocity,
@@ -196,7 +176,10 @@ fn draw_debug_motion(
 
         // Draw last line to character if debug mode is disabled
         if !debug_mode {
-            points.push((transform.translation, line_color(1.0, character.velocity)));
+            points.push((
+                transform.translation + character.feet_position(collider, transform.rotation) / 1.5,
+                line_color(1.0, character.velocity),
+            ));
         }
 
         gizmos.linestrip_gradient(points);

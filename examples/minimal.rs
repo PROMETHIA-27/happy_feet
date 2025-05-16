@@ -30,6 +30,7 @@ fn main() -> AppExit {
         })
         .init_gizmo_group::<PhysicsGizmos>()
         .add_input_context::<Walking>()
+        .add_observer(events_test)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
@@ -39,18 +40,15 @@ fn main() -> AppExit {
             PreUpdate,
             (move_input, look_input).after(EnhancedInputSystem),
         )
-        // .add_systems(
-        //     RunFixedMainLoop,
-        //     (move_input, look_input).in_set(RunFixedMainLoopSystem::BeforeFixedMainLoop),
-        // )
+        .add_systems(Update, (remove_ground_when_flying, capture_mouse))
         .add_systems(
-            Update,
+            PostUpdate,
             (
-                update_attachments,
-                update_camera_offset.after(update_attachments),
-                remove_ground_when_flying,
-                capture_mouse,
-            ),
+                update_attachments.after(TransformSystem::TransformPropagate),
+                update_camera_offset,
+                sync_attachment_global_transforms,
+            )
+                .chain(),
         )
         .run()
 }
@@ -106,7 +104,7 @@ fn setup(
     commands.spawn((
         Name::new("Player"),
         MovementMode::Walking,
-        // Sensor,
+        CollisionEventsEnabled,
         Character {
             skin_width: 0.1,
             walkable_angle: PI / 4.0 + 0.1,
@@ -114,6 +112,7 @@ fn setup(
             step_height: 0.0,
             ..Default::default()
         },
+        CollidingEntities::default(),
         Mass(10.0),
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
@@ -355,7 +354,7 @@ fn update_camera_offset(
 
 fn update_attachments(
     mut query: Query<(&mut Transform, &AttachedTo)>,
-    targets: Query<&GlobalTransform>,
+    targets: Query<&GlobalTransform, Without<AttachedTo>>,
 ) -> Result {
     for (mut transform, attached_to) in &mut query {
         let target_transform = targets.get(attached_to.0)?;
@@ -363,4 +362,23 @@ fn update_attachments(
     }
 
     Ok(())
+}
+
+fn sync_attachment_global_transforms(
+    transform_helper: TransformHelper,
+    mut query: Query<(Entity, &mut GlobalTransform), With<AttachedTo>>,
+) -> Result {
+    for (entity, mut transform) in &mut query {
+        *transform = transform_helper.compute_global_transform(entity)?;
+    }
+
+    Ok(())
+}
+
+fn events_test(trigger: Trigger<OnCollisionStart>, query: Query<Entity, With<Character>>) {
+    if !query.contains(trigger.target()) {
+        return;
+    }
+
+    println!("HELLO???");
 }

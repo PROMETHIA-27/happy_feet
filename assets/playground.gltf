@@ -67,7 +67,9 @@
 				34,
 				35,
 				36,
-				37
+				37,
+				38,
+				39
 			]
 		}
 	],
@@ -600,6 +602,36 @@
 				-1,
 				9,
 				23
+			]
+		},
+		{
+			"mesh":36,
+			"name":"Cube.033",
+			"rotation":[
+				-0.34618863463401794,
+				0.7424038648605347,
+				-0.24240389466285706,
+				0.5198368430137634
+			],
+			"translation":[
+				13.022659301757812,
+				0.9977686405181885,
+				-0.49862635135650635
+			]
+		},
+		{
+			"mesh":37,
+			"name":"Cube.034",
+			"rotation":[
+				0.24240386486053467,
+				0.5198367834091187,
+				0.34618863463401794,
+				0.7424039244651794
+			],
+			"translation":[
+				13,
+				0.9977686405181885,
+				-3.5019569396972656
 			]
 		}
 	],
@@ -1520,6 +1552,54 @@
 					},
 					"indices":7,
 					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
+					}
+				]
+			},
+			"name":"Cube.075",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":113,
+						"NORMAL":114,
+						"TEXCOORD_0":115
+					},
+					"indices":7,
+					"material":1
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
+					}
+				]
+			},
+			"name":"Cube.076",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":116,
+						"NORMAL":117,
+						"TEXCOORD_0":118
+					},
+					"indices":7,
+					"material":1
 				}
 			]
 		}
@@ -2593,6 +2673,62 @@
 			"componentType":5126,
 			"count":24,
 			"type":"VEC2"
+		},
+		{
+			"bufferView":113,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.20000001788139343,
+				4,
+				4
+			],
+			"min":[
+				-0.20000001788139343,
+				-4,
+				-4
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":114,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":115,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":116,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.19999998807907104,
+				4,
+				4
+			],
+			"min":[
+				-0.19999998807907104,
+				-4,
+				-4
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":117,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":118,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
 		}
 	],
 	"bufferViews":[
@@ -3273,6 +3409,42 @@
 			"byteLength":192,
 			"byteOffset":111860,
 			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":112052,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":112340,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":112628,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":112820,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":113108,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":113396,
+			"target":34962
 		}
 	],
 	"samplers":[
@@ -3283,7 +3455,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":112052,
+			"byteLength":113588,
 			"uri":"playground.bin"
 		}
 	]
