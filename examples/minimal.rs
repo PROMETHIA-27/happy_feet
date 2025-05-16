@@ -29,10 +29,11 @@ fn main() -> AppExit {
             ..Default::default()
         })
         .init_gizmo_group::<PhysicsGizmos>()
-        .add_input_context::<OnFoot>()
+        .add_input_context::<Walking>()
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
+        .add_observer(on_toggle_fly_mode)
         .add_systems(Startup, setup)
         .add_systems(
             PreUpdate,
@@ -47,6 +48,7 @@ fn main() -> AppExit {
             (
                 update_attachments,
                 update_camera_offset.after(update_attachments),
+                remove_ground_when_flying,
                 capture_mouse,
             ),
         )
@@ -82,6 +84,13 @@ struct AttachedTo(Entity);
 #[reflect(Component)]
 struct AttachmentPosition(Vec3);
 
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+enum MovementMode {
+    Walking,
+    Flying,
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -89,17 +98,20 @@ fn setup(
     asset_server: Res<AssetServer>,
 ) {
     // let shape = Capsule3d::new(0.4, 1.0);
-    let shape = Cuboid::from_length(0.4);
+    // let shape = Cuboid::from_length(0.4);
     // let shape = Cone::new(0.4, 1.4);
-    // let shape = Capsule3d::new(0.2, 1.0);
+    let shape = Capsule3d::new(0.2, 1.0);
     // let shape = Cylinder::new(0.2, 1.0);
 
     commands.spawn((
         Name::new("Player"),
+        MovementMode::Walking,
+        // Sensor,
         Character {
             skin_width: 0.1,
             walkable_angle: PI / 4.0 + 0.1,
             ground_check_distance: 0.2,
+            step_height: 0.0,
             ..Default::default()
         },
         Collider::from(shape),
@@ -114,7 +126,7 @@ fn setup(
             rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },
-        default_actions(),
+        walking_actions(),
         Attachments::spawn_one((
             PlayerCamera {
                 eye_height: 0.5,
@@ -135,7 +147,7 @@ fn setup(
 }
 
 #[derive(InputContext)]
-struct OnFoot;
+struct Walking;
 
 #[derive(InputAction, Debug)]
 #[input_action(output = Vec3)]
@@ -157,12 +169,22 @@ struct TogglePerspective;
 #[input_action(output = bool)]
 struct ToggleDebugMode;
 
-fn default_actions() -> Actions<OnFoot> {
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct ToggleFlyMode;
+
+fn walking_actions() -> Actions<Walking> {
     let mut actions = Actions::default();
 
     actions
         .bind::<Move>()
-        .to(Cardinal::wasd_keys())
+        .to((
+            Cardinal::wasd_keys(),
+            Bidirectional {
+                positive: KeyCode::KeyE.with_modifiers(SwizzleAxis::YZX),
+                negative: KeyCode::KeyQ.with_modifiers(SwizzleAxis::YZX),
+            },
+        ))
         .with_modifiers((Negate::y(), SwizzleAxis::XZY));
 
     actions
@@ -176,6 +198,11 @@ fn default_actions() -> Actions<OnFoot> {
         .with_modifiers((Scale::splat(-0.01), SwizzleAxis::YXZ));
 
     actions
+        .bind::<ToggleFlyMode>()
+        .to(KeyCode::KeyF)
+        .with_conditions(JustPress::default());
+
+    actions
         .bind::<TogglePerspective>()
         .to(KeyCode::KeyC)
         .with_conditions(JustPress::default());
@@ -186,6 +213,29 @@ fn default_actions() -> Actions<OnFoot> {
         .with_conditions(JustPress::default());
 
     actions
+}
+
+fn on_toggle_fly_mode(
+    trigger: Trigger<Fired<ToggleFlyMode>>,
+    mut query: Query<(&mut MovementMode, &mut CharacterMovement)>,
+) {
+    let (mut mode, mut movement) = query.get_mut(trigger.target()).unwrap();
+    match *mode {
+        MovementMode::Walking => {
+            *mode = MovementMode::Flying;
+
+            movement.drag = 10.0;
+            movement.air_acceleratin = 60.0;
+            movement.gravity = Vec3::ZERO;
+        }
+        MovementMode::Flying => {
+            *mode = MovementMode::Walking;
+
+            movement.drag = 0.01;
+            movement.air_acceleratin = 20.0;
+            movement.gravity = Vec3::NEG_Y * 20.0;
+        }
+    }
 }
 
 fn on_toggle_debug_mode(
@@ -225,21 +275,34 @@ fn on_toggle_perspective(
 
 fn on_jump(
     trigger: Trigger<Fired<Jump>>,
-    mut query: Query<(&mut Character, &CharacterMovement)>,
+    mut query: Query<(&mut Character, &CharacterMovement, &MovementMode)>,
 ) -> Result {
-    let (mut character, movement) = query.get_mut(trigger.target())?;
-    character.jump(movement.jump_impulse);
+    let (mut character, movement, mode) = query.get_mut(trigger.target())?;
+    if let MovementMode::Walking = mode {
+        character.jump(movement.jump_impulse);
+    }
     Ok(())
 }
 
+fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
+    for (mut character, mode) in &mut query {
+        if let MovementMode::Flying = mode {
+            character.ground = None;
+        }
+    }
+}
+
 fn move_input(
-    mut query: Query<(&mut MoveInput, &Actions<OnFoot>)>,
+    mut query: Query<(&mut MoveInput, &mut MovementMode, &Actions<Walking>)>,
     camera: Single<&GlobalTransform, With<PlayerCamera>>,
 ) {
     let mut camera_transform = camera.compute_transform();
-    camera_transform.align(Dir3::Y, Dir3::Y, Dir3::NEG_Z, camera_transform.forward());
 
-    for (mut input, actions) in &mut query {
+    for (mut input, mode, actions) in &mut query {
+        if let MovementMode::Walking = *mode {
+            camera_transform.align(Dir3::Y, Dir3::Y, Dir3::NEG_Z, camera_transform.forward());
+        }
+
         let axis = actions.action::<Move>().value().as_axis3d();
 
         input.set(camera_transform.rotation * axis.normalize_or_zero());
@@ -247,7 +310,7 @@ fn move_input(
 }
 
 fn look_input(
-    characters: Query<&Actions<OnFoot>>,
+    characters: Query<&Actions<Walking>>,
     mut cameras: Query<(&mut Transform, &Projection, &AttachedTo)>,
 ) -> Result {
     for (mut camera_transform, projection, attached_to) in &mut cameras {

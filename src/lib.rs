@@ -1,12 +1,15 @@
 use std::f32::consts::PI;
 
 use avian3d::prelude::*;
-use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
+use bevy::{
+    color::palettes::css::{CRIMSON, LIGHT_GREEN, WHITE},
+    input::InputSystem,
+    prelude::*,
+};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
-use itertools::Itertools;
 use project::{SlidePlanes, project_motion_on_ground, project_motion_on_wall};
-use sweep::{MoveImpact, character_sweep, ledge_check, move_and_slide, step_check};
+use sweep::{MoveImpact, move_and_slide, step_check, sweep};
 
 pub mod debug;
 pub(crate) mod ground;
@@ -28,23 +31,30 @@ impl Plugin for KinematicCharacterPlugin {
                 update_character_filter,
                 movement_input,
                 movement_acceleration,
+                character_movement,
             )
                 .chain(),
         );
 
         app.add_systems(
             PhysicsSchedule,
-            (
-                // character_depenetrate.in_set(NarrowPhaseSet::Update),
-                character_movement.in_set(PhysicsStepSet::Last),
-            ),
+            character_depenetrate.in_set(NarrowPhaseSet::Last),
         );
+
+        // app.add_systems(
+        //     PhysicsSchedule,
+        //     (
+        //         // character_depenetrate.in_set(NarrowPhaseSet::Update),
+        //         character_movement.in_set(PhysicsStepSet::Last),
+        //     ),
+        // );
     }
 }
 
 pub(crate) fn update_character_filter(
     mut query: Query<(Entity, &mut CharacterFilter, &CollisionLayers)>,
     sensors: Query<Entity, With<Sensor>>,
+    // bodies: Query<(Entity, &RigidBody)>,
 ) {
     for (entity, mut filter, collidion_layers) in &mut query {
         // Filter out any entities that's not in the character's collision filter
@@ -56,6 +66,13 @@ pub(crate) fn update_character_filter(
             .0
             .excluded_entities
             .extend(sensors.iter().chain([entity]));
+
+        // filter.0.excluded_entities.extend(
+        //     bodies
+        //         .iter()
+        //         .filter(|(_, r)| r.is_dynamic())
+        //         .map(|(e, _)| e),
+        // );
     }
 }
 
@@ -64,6 +81,8 @@ pub(crate) fn character_forces(
     time: Res<Time>,
 ) {
     for (mut character, movement) in &mut query {
+        character.velocity *= drag_factor(movement.drag, time.delta_secs());
+
         match character.grounded() {
             true => {
                 let f = friction_factor(character.velocity, movement.friction, time.delta_secs());
@@ -173,7 +192,7 @@ pub(crate) fn movement_acceleration(
             collider,
             transform.translation,
             transform.rotation,
-            [move_accel],
+            move_accel,
             8,
             character.skin_width,
             &filter.0,
@@ -191,22 +210,22 @@ pub(crate) fn movement_acceleration(
 
                 if planes.push(hit.normal1) {
                     if planes.is_corner() {
-                        state.velocities[0] = Vec3::ZERO;
+                        state.velocity = Vec3::ZERO;
                         return false;
                     }
 
                     for normal in planes.normals() {
                         if is_walkable(hit.normal1, *character.up, character.walkable_angle) {
-                            state.velocities[0] =
-                                project_motion_on_ground(state.velocities[0], normal, character.up);
+                            state.velocity =
+                                project_motion_on_ground(state.velocity, normal, character.up);
                         } else {
-                            state.velocities[0] =
-                                project_motion_on_wall(state.velocities[0], normal, character.up);
+                            state.velocity =
+                                project_motion_on_wall(state.velocity, normal, character.up);
                         }
                     }
 
                     for crease in planes.creases() {
-                        state.velocities[0] = state.velocities[0].project_onto_normalized(*crease);
+                        state.velocity = state.velocity.project_onto_normalized(*crease);
                     }
                 }
 
@@ -215,7 +234,7 @@ pub(crate) fn movement_acceleration(
         );
 
         transform.translation += out.offset;
-        move_accel = out.velocities[0];
+        move_accel = out.velocity;
 
         character.velocity += move_accel;
     }
@@ -223,63 +242,139 @@ pub(crate) fn movement_acceleration(
 
 // FIXME: doesn't work
 pub(crate) fn character_depenetrate(
+    mut overlaps: Local<Vec<(Dir3, f32)>>,
+    mut gizmos: Gizmos<CharacterGizmos>,
     collisions: Collisions,
     mut query: Query<(Entity, &mut Character, &mut Transform)>,
+    colliders: Query<&ColliderOf, Without<Sensor>>,
 ) {
-    for (entity, mut character, mut transform) in &mut query {
-        for contacts in collisions
-            .collisions_with(entity)
-            .filter(|c| !c.is_sensor())
-        {
-            assert!(contacts.body1.is_some() && contacts.body2.is_some());
+    for contacts in collisions.iter() {
+        overlaps.clear();
 
-            let is_first = contacts.body1 == Some(entity);
+        // Get the rigid body entities of the colliders (colliders could be children)
+        let Ok([&ColliderOf { body: rb1 }, &ColliderOf { body: rb2 }]) =
+            colliders.get_many([contacts.collider1, contacts.collider2])
+        else {
+            continue;
+        };
 
-            let hit_entity = match is_first {
-                true => contacts.body2.unwrap(),
-                false => contacts.body1.unwrap(),
+        let other: Entity;
+
+        let (entity, mut character, mut transform) = if let Ok(character) = query.get_mut(rb1) {
+            other = rb2;
+            character
+        } else if let Ok(character) = query.get_mut(rb2) {
+            other = rb1;
+            character
+        } else {
+            continue;
+        };
+
+        // TODO: crease / corner handling
+
+        for manifold in &contacts.manifolds {
+            let hit_normal = match entity == rb1 {
+                true => -manifold.normal,
+                false => manifold.normal,
             };
 
-            for manifold in &contacts.manifolds {
-                // let Some(contact) = manifold.find_deepest_contact() else {
-                //     continue;
-                // };
+            let stable_on_hit = is_walkable(hit_normal, *character.up, character.walkable_angle);
 
-                let hit_normal = match is_first {
-                    true => -manifold.normal,
-                    false => manifold.normal,
+            let stable_ground = character.ground.map(|g| *g.normal);
+
+            let obstruction_normal =
+                obstruction_normal(stable_ground, hit_normal, stable_on_hit, *character.up);
+
+            // let obstruction_normal = hit_normal;
+
+            for contact in &manifold.points {
+                let Ok((direction, magnitude)) =
+                    Dir3::new_and_length(hit_normal.project_onto(obstruction_normal))
+                else {
+                    continue;
                 };
 
-                let stable_on_hit =
-                    is_walkable(hit_normal, *character.up, character.walkable_angle);
+                // let depth = contact.penetration * magnitude + character.skin_width;
+                let depth = contact.penetration * magnitude;
 
-                let stable_ground = character.ground.map(|g| *g.normal);
-
-                let obstruction_normal =
-                    obstruction_normal(stable_ground, hit_normal, stable_on_hit, *character.up);
-
-                character.velocity = project_velocity(
-                    character.velocity,
-                    stable_ground,
-                    *character.up,
-                    obstruction_normal,
-                    stable_on_hit,
-                );
-
-                if stable_on_hit {
-                    character.ground = Some(Ground {
-                        entity: hit_entity,
-                        normal: Dir3::new(hit_normal).unwrap(),
-                    });
-                }
-
-                for contact in &manifold.points {
-                    if contact.penetration > 0.0 {
-                        transform.translation += obstruction_normal * contact.penetration;
+                match overlaps.binary_search_by(|(_, d)| depth.total_cmp(&d)) {
+                    Ok(index) => {
+                        if overlaps[index].0.dot(*direction) > 1.0 - 1e-4 {
+                            overlaps.push((direction, depth));
+                            overlaps.swap_remove(index);
+                        } else {
+                            overlaps.insert(index, (direction, depth));
+                        }
+                    }
+                    Err(index) => {
+                        overlaps.insert(index, (direction, depth));
                     }
                 }
             }
+
+            if character.velocity.dot(hit_normal) > 0.0 {
+                continue;
+            }
+
+            character.velocity = project_velocity(
+                character.velocity,
+                stable_ground,
+                *character.up,
+                obstruction_normal,
+                stable_on_hit,
+            );
+
+            if stable_on_hit {
+                character.ground = Some(Ground {
+                    entity: other,
+                    normal: Dir3::new(hit_normal).unwrap(),
+                });
+            }
         }
+
+        let mut fixup = Vec3::ZERO;
+
+        for i in 0..overlaps.len() {
+            let (direction, depth) = overlaps[i];
+
+            let color = match depth > 0.0 {
+                true => CRIMSON,
+                false => LIGHT_GREEN,
+            };
+
+            gizmos.line_gradient(
+                transform.translation,
+                transform.translation - direction * depth,
+                color,
+                color.with_alpha(0.0),
+            );
+
+            if depth <= 0.0 {
+                continue;
+            }
+
+            fixup += direction * depth;
+
+            for j in i..overlaps.len() {
+                let (next_direction, ref mut next_depth) = overlaps[j];
+
+                let fixed = f32::max(0.0, direction.dot(*next_direction) * depth);
+                *next_depth -= fixed;
+            }
+        }
+
+        let Ok((direction, depth)) = Dir3::new_and_length(fixup) else {
+            continue;
+        };
+
+        gizmos.line_gradient(
+            transform.translation,
+            transform.translation + direction * depth,
+            WHITE,
+            WHITE.with_alpha(0.0),
+        );
+
+        transform.translation += direction * depth;
     }
 }
 
@@ -290,27 +385,27 @@ pub(crate) fn character_movement(
         &mut Character,
         &mut Transform,
         &Collider,
+        &ComputedMass,
         &CharacterFilter,
-        &mut SlidePlanes,
         Has<Sensor>,
         Option<&mut DebugMotion>,
-        // Option<&mut DebugPoints>,
         Has<DebugMode>,
     )>,
+    mut bodies: Query<(&mut LinearVelocity, &ComputedMass, &RigidBody)>,
     time: Res<Time>,
 ) -> Result {
     for (
         mut character,
         mut transform,
         collider,
+        character_mass,
         filter,
-        mut planes,
-        sensor,
+        is_sensor,
         mut debug_motion,
         debug_mode,
     ) in &mut query
     {
-        if sensor {
+        if is_sensor {
             transform.translation += character.velocity * time.delta_secs();
             continue;
         }
@@ -339,10 +434,6 @@ pub(crate) fn character_movement(
             false => time.delta_secs(),
         };
 
-        let Ok(original_direction) = Dir3::new(character.velocity) else {
-            continue;
-        };
-
         let mut plane_index = 0;
         let mut previous_hit_normal = None;
         let mut previous_velocity = character.velocity;
@@ -351,7 +442,7 @@ pub(crate) fn character_movement(
             collider,
             transform.translation,
             transform.rotation,
-            [character.velocity],
+            character.velocity,
             8,
             character.skin_width,
             &filter.0,
@@ -362,10 +453,10 @@ pub(crate) fn character_movement(
                  hit,
                  end,
                  direction,
-                 remaining,
+                 remaining_motion,
                  ..
              }| {
-                let velocity_before_projection = state.velocities[0];
+                let velocity_before_projection = state.velocity;
                 let current_ground = character.ground.map(|g| *g.normal);
 
                 let hit_is_walkable =
@@ -373,19 +464,19 @@ pub(crate) fn character_movement(
                 let obstruction_normal =
                     obstruction_normal(current_ground, hit.normal1, hit_is_walkable, *character.up);
 
-                if !hit_is_walkable {
+                if !hit_is_walkable && character.grounded() {
                     if let Some((offset, hit)) = step_check(
                         &mut gizmos,
                         collider,
-                        transform.translation + state.offset,
+                        end,
                         transform.rotation,
                         direction,
+                        remaining_motion,
                         character.up,
                         character.walkable_angle,
-                        remaining,
-                        2.0,
+                        1.0,
                         0.1,
-                        2.0,
+                        character.step_height,
                         character.skin_width,
                         &spatial_query,
                         &filter.0,
@@ -396,6 +487,31 @@ pub(crate) fn character_movement(
                         });
 
                         state.offset += offset;
+
+                        info!("DID STEP!!!");
+
+                        return false;
+                    }
+                }
+
+                if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
+                    if other_body.is_dynamic() {
+                        other_vel.0 += direction
+                            * remaining_motion
+                            * other_mass.inverse()
+                            * character_mass.value();
+
+                        state.velocity -= direction.project_onto(obstruction_normal)
+                            * remaining_motion
+                            * character_mass.inverse()
+                            * other_mass.value();
+
+                        if hit_is_walkable {
+                            new_ground = Some(Ground {
+                                entity: hit.entity,
+                                normal: Dir3::new(hit.normal1).unwrap(),
+                            });
+                        }
 
                         return false;
                     }
@@ -409,8 +525,8 @@ pub(crate) fn character_movement(
                 ) {
                     new_ground = Some(ground);
 
-                    state.velocities[0] = project_velocity(
-                        state.velocities[0],
+                    state.velocity = project_velocity(
+                        state.velocity,
                         current_ground,
                         *character.up,
                         obstruction_normal,
@@ -422,8 +538,8 @@ pub(crate) fn character_movement(
                         0 => {
                             plane_index = 1;
 
-                            state.velocities[0] = project_velocity(
-                                state.velocities[0],
+                            state.velocity = project_velocity(
+                                state.velocity,
                                 current_ground,
                                 *character.up,
                                 obstruction_normal,
@@ -440,7 +556,7 @@ pub(crate) fn character_movement(
                             );
 
                             if let Some(crease) = evaluate_crease(
-                                state.velocities[0],
+                                state.velocity,
                                 previous_velocity,
                                 hit.normal1,
                                 previous_hit_normal,
@@ -450,14 +566,14 @@ pub(crate) fn character_movement(
                             ) {
                                 if character.grounded() {
                                     plane_index = 3;
-                                    state.velocities[0] = Vec3::ZERO;
+                                    state.velocity = Vec3::ZERO;
                                 } else {
                                     plane_index = 2;
-                                    state.velocities[0] = state.velocities[0].project_onto(crease);
+                                    state.velocity = state.velocity.project_onto(crease);
                                 }
                             } else {
-                                state.velocities[0] = project_velocity(
-                                    state.velocities[0],
+                                state.velocity = project_velocity(
+                                    state.velocity,
                                     current_ground,
                                     *character.up,
                                     obstruction_normal,
@@ -468,7 +584,7 @@ pub(crate) fn character_movement(
                         // found blocking crease
                         2 => {
                             plane_index = 3;
-                            state.velocities[0] = Vec3::ZERO;
+                            state.velocity = Vec3::ZERO;
                         }
                         // found blocking corner
                         _ => {}
@@ -485,7 +601,7 @@ pub(crate) fn character_movement(
                             duration,
                             DebugPoint {
                                 translation: transform.translation + state.offset,
-                                velocity: state.velocities.iter().sum(),
+                                velocity: state.velocity,
                                 hit: Some(DebugHit {
                                     point: hit.point1,
                                     normal: hit.normal1,
@@ -499,15 +615,8 @@ pub(crate) fn character_movement(
             },
         );
 
-        // match plane_index {
-        //     0 => {}
-        //     1 => println!("found blocking plane"),
-        //     2 => println!("found blocking crease"),
-        //     _ => println!("found blocking corner"),
-        // }
-
         let mut new_translation = transform.translation + out.offset;
-        let new_velocity = out.velocities.iter().sum();
+        let new_velocity = out.velocity;
 
         if !character.grounded() && character.velocity.dot(*character.up) > 1e-4 {
             new_ground = None;
@@ -531,7 +640,7 @@ pub(crate) fn character_movement(
                     let mut hit_roof = false;
 
                     if ground_distance < 0.0 {
-                        if let Some(..) = character_sweep(
+                        if let Some(..) = sweep(
                             collider,
                             transform.translation,
                             transform.rotation,
@@ -686,10 +795,6 @@ fn project_velocity(
     velocity
 }
 
-trait MovementHandler {
-    fn project_velocity();
-}
-
 pub(crate) enum SweepState {
     None,
     Plane,
@@ -706,9 +811,17 @@ fn direction_aligned_with_surface(vector: Vec3, normal: Vec3, up: Vec3) -> Vec3 
     normal.cross(right).normalize_or_zero()
 }
 
+pub(crate) struct CharacterVelocity {
+    pub movement: Vec3,
+    pub ground: Vec3,
+}
+
 pub(crate) struct GroundSettings {
-    layers: LayerMask,
+    /// mask for walkable ground
+    layers: Option<LayerMask>,
+    /// max walkable angle
     max_angle: f32,
+    /// max distance from the ground
     max_distance: f32,
 }
 
@@ -775,7 +888,7 @@ impl Character {
 
         // Push the character away from ramps
         if let Some(ground) = self.ground.take() {
-            self.velocity -= ground.normal * self.velocity.dot(*ground.normal);
+            self.velocity -= ground.normal * self.velocity.dot(*ground.normal).min(0.0);
         }
 
         self.velocity += self.up * impulse;
@@ -818,6 +931,7 @@ pub struct CharacterMovement {
     pub air_acceleratin: f32,
     pub gravity: Vec3,
     pub friction: f32,
+    pub drag: f32,
     pub jump_impulse: f32,
 }
 
@@ -827,8 +941,9 @@ impl Default for CharacterMovement {
             target_speed: 8.0,
             ground_acceleratin: 100.0,
             friction: 60.0,
+            drag: 0.01,
             jump_impulse: 7.0,
-            air_acceleratin: 30.0,
+            air_acceleratin: 20.0,
             gravity: Vec3::Y * -20.0,
         }
     }
@@ -885,9 +1000,14 @@ fn acceleration(
     direction * accel_speed
 }
 
+#[must_use]
+pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
+    f32::exp(-drag * delta)
+}
+
 /// Constant acceleration in the opposite direction of velocity.
 #[must_use]
-pub fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
+pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
     let speed_sq = velocity.length_squared();
 
     if speed_sq < 1e-4 {

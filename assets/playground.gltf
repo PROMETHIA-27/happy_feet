@@ -57,26 +57,19 @@
 				24,
 				25,
 				26,
-				27
+				27,
+				28,
+				29,
+				30,
+				31,
+				32
 			]
 		}
 	],
 	"nodes":[
 		{
 			"extras":{
-				"skein":[
-					{
-						"avian3d::collision::collider::constructor::ColliderConstructor":{
-							"HalfSpace":{
-								"outward_normal":[
-									0.0,
-									1.0,
-									0.0
-								]
-							}
-						}
-					}
-				]
+				"skein":[]
 			},
 			"mesh":0,
 			"name":"Plane"
@@ -438,6 +431,86 @@
 				0,
 				17
 			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":26,
+			"name":"Cube.022",
+			"translation":[
+				0,
+				6,
+				17
+			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":27,
+			"name":"Cube.023",
+			"scale":[
+				0.20000000298023224,
+				0.20000000298023224,
+				0.20000000298023224
+			],
+			"translation":[
+				-1,
+				5,
+				13
+			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":28,
+			"name":"Cube.024",
+			"scale":[
+				0.4000000059604645,
+				0.4000000059604645,
+				0.4000000059604645
+			],
+			"translation":[
+				-2,
+				6,
+				15
+			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":29,
+			"name":"Cube.025",
+			"scale":[
+				0.6000000238418579,
+				0.6000000238418579,
+				0.6000000238418579
+			],
+			"translation":[
+				-4,
+				7,
+				15
+			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":30,
+			"name":"Cube.026",
+			"scale":[
+				0.800000011920929,
+				0.800000011920929,
+				0.800000011920929
+			],
+			"translation":[
+				-3,
+				8,
+				16
+			]
 		}
 	],
 	"materials":[
@@ -462,10 +535,39 @@
 				"metallicFactor":0,
 				"roughnessFactor":0.800000011920929
 			}
+		},
+		{
+			"doubleSided":true,
+			"name":"Red",
+			"pbrMetallicRoughness":{
+				"baseColorTexture":{
+					"index":2
+				},
+				"metallicFactor":0,
+				"roughnessFactor":0.800000011920929
+			}
 		}
 	],
 	"meshes":[
 		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":{
+							"HalfSpace":{
+								"outward_normal":[
+									0.0,
+									1.0,
+									0.0
+								]
+							}
+						}
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
+					}
+				]
+			},
 			"name":"Plane",
 			"primitives":[
 				{
@@ -484,6 +586,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -505,6 +610,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -526,6 +634,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -547,6 +658,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -568,6 +682,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -589,6 +706,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -610,6 +730,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -631,6 +754,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -652,6 +778,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -673,6 +802,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -694,6 +826,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -715,6 +850,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"TrimeshFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -736,6 +874,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -757,6 +898,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -778,6 +922,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -799,6 +946,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -820,6 +970,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -841,6 +994,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -862,6 +1018,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -883,6 +1042,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -904,6 +1066,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -925,6 +1090,9 @@
 				"skein":[
 					{
 						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -950,6 +1118,9 @@
 								"radius":1.0
 							}
 						}
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -975,6 +1146,9 @@
 								"radius":1.0
 							}
 						}
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -1000,6 +1174,9 @@
 								"radius":1.0
 							}
 						}
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Static"
 					}
 				]
 			},
@@ -1015,6 +1192,126 @@
 					"material":1
 				}
 			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.064",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":83,
+						"NORMAL":84,
+						"TEXCOORD_0":85
+					},
+					"indices":7,
+					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.065",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":86,
+						"NORMAL":87,
+						"TEXCOORD_0":88
+					},
+					"indices":7,
+					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.066",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":89,
+						"NORMAL":90,
+						"TEXCOORD_0":91
+					},
+					"indices":7,
+					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.067",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":92,
+						"NORMAL":93,
+						"TEXCOORD_0":94
+					},
+					"indices":7,
+					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.068",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":95,
+						"NORMAL":96,
+						"TEXCOORD_0":97
+					},
+					"indices":7,
+					"material":2
+				}
+			]
 		}
 	],
 	"textures":[
@@ -1025,6 +1322,10 @@
 		{
 			"sampler":0,
 			"source":1
+		},
+		{
+			"sampler":0,
+			"source":2
 		}
 	],
 	"images":[
@@ -1037,6 +1338,11 @@
 			"mimeType":"image/png",
 			"name":"texture_07",
 			"uri":"texture_07.png"
+		},
+		{
+			"mimeType":"image/png",
+			"name":"texture_04",
+			"uri":"texture_04.png"
 		}
 	],
 	"accessors":[
@@ -1797,6 +2103,146 @@
 			"componentType":5126,
 			"count":583,
 			"type":"VEC2"
+		},
+		{
+			"bufferView":83,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.5,
+				0.5,
+				0.5
+			],
+			"min":[
+				-0.5,
+				-0.5,
+				-0.5
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":84,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":85,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":86,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.5,
+				0.5,
+				0.5
+			],
+			"min":[
+				-0.5,
+				-0.5,
+				-0.5
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":87,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":88,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":89,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.5,
+				0.5,
+				0.5
+			],
+			"min":[
+				-0.5,
+				-0.5,
+				-0.5
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":90,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":91,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":92,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.5,
+				0.5,
+				0.5
+			],
+			"min":[
+				-0.5,
+				-0.5,
+				-0.5
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":93,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":94,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":95,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				0.5,
+				0.5,
+				0.5
+			],
+			"min":[
+				-0.5,
+				-0.5,
+				-0.5
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":96,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":97,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
 		}
 	],
 	"bufferViews":[
@@ -2297,6 +2743,96 @@
 			"byteLength":4664,
 			"byteOffset":99708,
 			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":104372,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":104660,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":104948,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":105140,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":105428,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":105716,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":105908,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":106196,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":106484,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":106676,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":106964,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":107252,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":107444,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":107732,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":108020,
+			"target":34962
 		}
 	],
 	"samplers":[
@@ -2307,7 +2843,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":104372,
+			"byteLength":108212,
 			"uri":"playground.bin"
 		}
 	]

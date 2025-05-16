@@ -14,7 +14,7 @@ pub(crate) fn plugin(app: &mut App) {
                 joints: GizmoLineJoint::Bevel,
                 ..Default::default()
             },
-            depth_bias: -0.02,
+            depth_bias: -0.1,
             ..Default::default()
         },
     );

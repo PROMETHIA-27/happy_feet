@@ -2,7 +2,7 @@ use std::{f32::consts::PI, ops::Range};
 
 use avian3d::prelude::*;
 use bevy::{
-    color::palettes::css::{BLACK, CRIMSON, LIGHT_GREEN, RED, WHITE},
+    color::palettes::css::{BLACK, CRIMSON, GREEN, LIGHT_GREEN, RED, WHITE},
     prelude::*,
 };
 
@@ -12,7 +12,7 @@ use crate::{CharacterGizmos, is_walkable, project::SlidePlanes};
 
 /// Returns the safe hit distance and the hit data from the spatial query.
 #[must_use]
-pub(crate) fn character_sweep(
+pub(crate) fn sweep(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,
@@ -50,9 +50,9 @@ pub(crate) fn step_check(
     origin: Vec3,
     rotation: Quat,
     direction: Dir3,
+    motion: f32,
     up: Dir3,
     walkable_angle: f32,
-    mut step_forward: f32,
     mut max_forward: f32,
     min_height: f32,
     mut max_height: f32,
@@ -60,8 +60,12 @@ pub(crate) fn step_check(
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
 ) -> Option<(Vec3, ShapeHitData)> {
+    if max_height <= 0.0 {
+        return None;
+    }
+
     // check for roof
-    if let Some((distance, _)) = character_sweep(
+    if let Some((distance, _)) = sweep(
         shape,
         origin,
         rotation,
@@ -80,7 +84,7 @@ pub(crate) fn step_check(
     gizmos.line(origin, origin + up_offset, BLACK);
 
     // check for wall
-    if let Some((distance, _)) = character_sweep(
+    if let Some((distance, _)) = sweep(
         shape,
         origin + up_offset,
         rotation,
@@ -100,11 +104,10 @@ pub(crate) fn step_check(
         BLACK,
     );
 
-    step_forward = step_forward.min(max_forward);
-    let forward_offset = direction * step_forward;
+    let forward_offset = direction * motion.min(max_forward);
 
     // check for base step
-    if let Some((distance, hit)) = character_sweep(
+    if let Some((distance, hit)) = sweep(
         shape,
         origin + up_offset + forward_offset,
         rotation,
@@ -122,26 +125,16 @@ pub(crate) fn step_check(
         }
     }
 
-    // start at beginning otherwise
-    step_forward = 0.0;
-
     // loop check for floor
+    let mut forward = 0.0;
     let mut least_forward = 0.0;
-    let mut most_forward = None;
 
     let mut result = None;
 
-    let max_steps = 8;
-    let step_size = max_forward / max_steps as f32;
+    for i in 0..8 {
+        let forward_offset = direction * forward;
 
-    for _ in 0..8 {
-        if step_forward > max_forward {
-            break;
-        }
-
-        let forward_offset = direction * step_forward;
-
-        if let Some((distance, hit)) = character_sweep(
+        if let Some((distance, hit)) = sweep(
             shape,
             origin + up_offset + forward_offset,
             rotation,
@@ -156,32 +149,28 @@ pub(crate) fn step_check(
 
             let is_walkable = is_walkable(hit.normal1, *up, walkable_angle - 1e-4);
 
-            // let is_steppable = is_walkable && max_height - distance > 0.01;
-
             gizmos.line(
                 origin + up_offset + forward_offset,
                 origin + up_offset + forward_offset + down_offset,
                 match is_walkable {
-                    true => LIGHT_GREEN,
+                    true => match i == 7 {
+                        true => LIGHT_GREEN,
+                        false => GREEN,
+                    },
                     false => CRIMSON,
                 },
             );
 
             if is_walkable {
                 result = Some((up_offset + forward_offset + down_offset, hit));
-                most_forward = Some(step_forward);
-                step_forward = (step_forward + least_forward) / 2.0;
+                max_forward = forward;
+                forward = (forward + least_forward) / 2.0;
                 continue;
-            } else {
-                least_forward = step_forward;
-                if let Some(most_forward) = most_forward {
-                    step_forward = (step_forward + most_forward) / 2.0;
-                    continue;
-                }
             }
         }
 
-        step_forward += step_size;
+        least_forward = forward;
+        forward = (forward + max_forward) / 2.0;
     }
 
     result
@@ -244,8 +233,8 @@ pub(crate) fn ledge_check(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MoveAndSlideState<const SIZE: usize> {
-    pub velocities: [Vec3; SIZE],
+pub(crate) struct MoveAndSlideState {
+    pub velocity: Vec3,
     pub offset: Vec3,
     pub remaining_time: f32,
 }
@@ -255,8 +244,8 @@ pub(crate) struct MoveImpact {
     pub start: Vec3,
     pub end: Vec3,
     pub direction: Dir3,
-    pub incoming: f32,
-    pub remaining: f32,
+    pub incoming_motin: f32,
+    pub remaining_motion: f32,
     pub hit: ShapeHitData,
 }
 
@@ -266,25 +255,25 @@ pub(crate) struct MoveAndSlideResult {
     pub velocity: Vec3,
 }
 
-pub(crate) fn move_and_slide<const SIZE: usize>(
+pub(crate) fn move_and_slide(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,
-    velocities: [Vec3; SIZE],
+    velocity: Vec3,
     max_slide_count: usize,
     skin_width: f32,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
-    mut on_hit: impl FnMut(&mut MoveAndSlideState<SIZE>, MoveImpact) -> bool,
-) -> MoveAndSlideState<SIZE> {
+    mut on_hit: impl FnMut(&mut MoveAndSlideState, MoveImpact) -> bool,
+) -> MoveAndSlideState {
     let mut state = MoveAndSlideState {
-        velocities,
+        velocity,
         offset: Vec3::ZERO,
         remaining_time: delta,
     };
 
-    let Ok(original_direction) = Dir3::new(state.velocities.iter().sum()) else {
+    let Ok(original_direction) = Dir3::new(state.velocity) else {
         return state;
     };
 
@@ -292,14 +281,14 @@ pub(crate) fn move_and_slide<const SIZE: usize>(
 
     for _ in 0..max_slide_count {
         let Ok((direction, max_distance)) =
-            Dir3::new_and_length(state.velocities.iter().sum::<Vec3>() * state.remaining_time)
+            Dir3::new_and_length(state.velocity * state.remaining_time)
         else {
             break;
         };
 
         let start = origin + state.offset;
 
-        let Some((distance, hit)) = character_sweep(
+        let Some((distance, hit)) = sweep(
             shape,
             start,
             rotation,
@@ -329,23 +318,25 @@ pub(crate) fn move_and_slide<const SIZE: usize>(
                 start,
                 end,
                 direction,
-                incoming: distance,
-                remaining: max_distance - distance,
+                incoming_motin: distance,
+                remaining_motion: max_distance - distance,
                 hit,
             },
         ) {
             continue;
         }
 
-        if planes.push(hit.normal1) {
-            for velocity in &mut state.velocities {
-                *velocity = planes.project_velocity(*velocity, original_direction);
+        todo!()
 
-                if velocity.dot(*original_direction) <= 0.0 {
-                    *velocity = Vec3::ZERO;
-                }
-            }
-        }
+        // if planes.push(hit.normal1) {
+        //     for velocity in &mut state.velocity {
+        //         *velocity = planes.project_velocity(*velocity, original_direction);
+
+        //         if velocity.dot(*original_direction) <= 0.0 {
+        //             *velocity = Vec3::ZERO;
+        //         }
+        //     }
+        // }
     }
 
     state
