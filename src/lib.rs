@@ -9,7 +9,7 @@ use bevy::{
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
 use project::{SlidePlanes, project_motion_on_ground, project_motion_on_wall};
-use sweep::{MoveImpact, move_and_slide, step_check, sweep};
+use sweep::{CollideImpact, collide_and_slide, step_check, sweep};
 
 pub mod debug;
 pub(crate) mod ground;
@@ -31,9 +31,16 @@ impl Plugin for KinematicCharacterPlugin {
                 update_character_filter,
                 movement_input,
                 movement_acceleration,
-                character_movement,
             )
                 .chain(),
+        );
+
+        app.add_systems(
+            FixedPostUpdate,
+            (
+                physics_interactions.before(PhysicsSet::Prepare),
+                character_movement.after(PhysicsSet::Sync),
+            ),
         );
 
         app.add_systems(
@@ -188,7 +195,7 @@ pub(crate) fn movement_acceleration(
             continue;
         };
 
-        let out = move_and_slide(
+        let out = collide_and_slide(
             collider,
             transform.translation,
             transform.rotation,
@@ -198,7 +205,7 @@ pub(crate) fn movement_acceleration(
             &filter.0,
             &spatial_query,
             time.delta_secs(),
-            |state, MoveImpact { hit, .. }| {
+            |state, CollideImpact { hit, .. }| {
                 if let Some(ground) = Ground::new_if_walkable(
                     hit.entity,
                     hit.normal1,
@@ -378,6 +385,58 @@ pub(crate) fn character_depenetrate(
     }
 }
 
+fn physics_interactions(
+    spatial_query: SpatialQuery,
+    mut query: Query<(
+        &mut Character,
+        &mut Transform,
+        &Collider,
+        &ComputedMass,
+        &CharacterFilter,
+    )>,
+    mut bodies: Query<(&mut LinearVelocity, &ComputedMass, &RigidBody)>,
+    time: Res<Time>,
+) {
+    for (mut character, mut transform, collider, character_mass, filter) in &mut query {
+        let Ok((direction, max_distance)) =
+            Dir3::new_and_length(character.velocity * time.delta_secs())
+        else {
+            continue;
+        };
+
+        let Some((distance, hit)) = sweep(
+            collider,
+            transform.translation,
+            transform.rotation,
+            direction,
+            max_distance,
+            character.skin_width,
+            &spatial_query,
+            &filter.0,
+            false,
+        ) else {
+            continue;
+        };
+
+        let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) else {
+            continue;
+        };
+
+        // transform.translation += direction * distance;
+
+        if other_body.is_dynamic() {
+            let remaining = max_distance - distance;
+
+            other_vel.0 += direction.project_onto(hit.normal1)
+                * remaining
+                * other_mass.inverse()
+                * character_mass.value();
+
+            character.velocity -= direction.project_onto(hit.normal1) * distance;
+        }
+    }
+}
+
 pub(crate) fn character_movement(
     mut gizmos: Gizmos<CharacterGizmos>,
     spatial_query: SpatialQuery,
@@ -438,7 +497,7 @@ pub(crate) fn character_movement(
         let mut previous_hit_normal = None;
         let mut previous_velocity = character.velocity;
 
-        let out = move_and_slide(
+        let out = collide_and_slide(
             collider,
             transform.translation,
             transform.rotation,
@@ -449,10 +508,11 @@ pub(crate) fn character_movement(
             &spatial_query,
             duration,
             |state,
-             MoveImpact {
+             CollideImpact {
                  hit,
                  end,
                  direction,
+                 incoming_motion,
                  remaining_motion,
                  ..
              }| {
@@ -496,24 +556,10 @@ pub(crate) fn character_movement(
 
                 if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
                     if other_body.is_dynamic() {
-                        other_vel.0 += direction
+                        other_vel.0 += direction.project_onto(hit.normal1)
                             * remaining_motion
                             * other_mass.inverse()
                             * character_mass.value();
-
-                        state.velocity -= direction.project_onto(obstruction_normal)
-                            * remaining_motion
-                            * character_mass.inverse()
-                            * other_mass.value();
-
-                        if hit_is_walkable {
-                            new_ground = Some(Ground {
-                                entity: hit.entity,
-                                normal: Dir3::new(hit.normal1).unwrap(),
-                            });
-                        }
-
-                        return false;
                     }
                 }
 

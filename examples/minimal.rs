@@ -114,6 +114,7 @@ fn setup(
             step_height: 0.0,
             ..Default::default()
         },
+        Mass(10.0),
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
         MeshMaterial3d(materials.add(StandardMaterial {

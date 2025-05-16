@@ -240,11 +240,11 @@ pub(crate) struct MoveAndSlideState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct MoveImpact {
+pub(crate) struct CollideImpact {
     pub start: Vec3,
     pub end: Vec3,
     pub direction: Dir3,
-    pub incoming_motin: f32,
+    pub incoming_motion: f32,
     pub remaining_motion: f32,
     pub hit: ShapeHitData,
 }
@@ -255,7 +255,7 @@ pub(crate) struct MoveAndSlideResult {
     pub velocity: Vec3,
 }
 
-pub(crate) fn move_and_slide(
+pub(crate) fn collide_and_slide(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,
@@ -265,7 +265,7 @@ pub(crate) fn move_and_slide(
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
-    mut on_hit: impl FnMut(&mut MoveAndSlideState, MoveImpact) -> bool,
+    mut on_hit: impl FnMut(&mut MoveAndSlideState, CollideImpact) -> bool,
 ) -> MoveAndSlideState {
     let mut state = MoveAndSlideState {
         velocity,
@@ -314,11 +314,11 @@ pub(crate) fn move_and_slide(
 
         if !on_hit(
             &mut state,
-            MoveImpact {
+            CollideImpact {
                 start,
                 end,
                 direction,
-                incoming_motin: distance,
+                incoming_motion: distance,
                 remaining_motion: max_distance - distance,
                 hit,
             },
