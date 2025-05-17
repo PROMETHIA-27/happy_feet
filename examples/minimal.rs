@@ -107,6 +107,7 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         CollisionEventsEnabled,
+        // Sensor,
         Character {
             skin_width: 0.1,
             ..Default::default()
@@ -400,7 +401,7 @@ fn on_collision_events_start(
 }
 
 fn on_collision_events_end(
-    trigger: Trigger<OnCollisionStart>,
+    trigger: Trigger<OnCollisionEnd>,
     query: Query<Entity, With<Character>>,
     names: Query<NameOrEntity>,
 ) {

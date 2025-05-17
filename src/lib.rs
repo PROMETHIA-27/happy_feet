@@ -354,13 +354,16 @@ pub(crate) fn depenetrate_character(
 
 fn physics_interactions(
     spatial_query: SpatialQuery,
-    mut query: Query<(
-        &mut Character,
-        &mut Transform,
-        &Collider,
-        &ComputedMass,
-        &CharacterFilter,
-    )>,
+    mut query: Query<
+        (
+            &mut Character,
+            &mut Transform,
+            &Collider,
+            &ComputedMass,
+            &CharacterFilter,
+        ),
+        Without<Sensor>,
+    >,
     mut bodies: Query<(&mut LinearVelocity, &ComputedMass, &RigidBody)>,
     time: Res<Time>,
 ) {
@@ -546,7 +549,11 @@ pub(crate) fn move_character(
                     }
                 }
 
+                // Trigger collision events
                 collision_started_events.write(CollisionStarted(entity, hit.entity));
+
+                // For now, assume the collision is ended instantly which is probably the case with move and slide anyways
+                collision_ended_events.write(CollisionEnded(entity, hit.entity));
 
                 if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
                     if other_body.is_dynamic() {
