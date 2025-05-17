@@ -10,7 +10,7 @@ use bevy::{
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, ground_check, is_walkable};
 use projection::{CollisionState, SurfacePlane};
-use sweep::{MovementImpact, collide_and_slide, step_check, sweep};
+use sweep::{MovementConfig, MovementImpact, collide_and_slide, step_check, sweep};
 
 pub mod debug;
 pub(crate) mod ground;
@@ -244,7 +244,7 @@ pub(crate) fn depenetrate_character(
     mut overlaps: Local<Vec<(Dir3, f32)>>,
     mut gizmos: Gizmos<CharacterGizmos>,
     collisions: Collisions,
-    mut query: Query<(Entity, &mut Character, &mut Transform)>,
+    mut query: Query<(Entity, &mut Character, &GroundingSettings, &mut Transform)>,
     colliders: Query<&ColliderOf, Without<Sensor>>,
 ) {
     for contacts in collisions.iter() {
@@ -259,15 +259,16 @@ pub(crate) fn depenetrate_character(
 
         let other: Entity;
 
-        let (entity, mut character, mut transform) = if let Ok(character) = query.get_mut(rb1) {
-            other = rb2;
-            character
-        } else if let Ok(character) = query.get_mut(rb2) {
-            other = rb1;
-            character
-        } else {
-            continue;
-        };
+        let (entity, mut character, grounding_settings, mut transform) =
+            if let Ok(character) = query.get_mut(rb1) {
+                other = rb2;
+                character
+            } else if let Ok(character) = query.get_mut(rb2) {
+                other = rb1;
+                character
+            } else {
+                continue;
+            };
 
         // TODO: crease / corner handling
 
@@ -281,19 +282,10 @@ pub(crate) fn depenetrate_character(
 
             let plane = SurfacePlane::new(
                 hit_normal,
+                is_walkable(hit_normal, grounding_settings.max_angle, *character.up),
                 ground_normal,
-                character.walkable_angle,
                 character.up,
             );
-
-            // let stable_on_hit = is_walkable(hit_normal, *character.up, character.walkable_angle);
-
-            // let stable_ground = character.ground.map(|g| *g.normal);
-
-            // let obstruction_normal =
-            //     get_obstruction_normal(stable_ground, hit_normal, stable_on_hit, *character.up);
-
-            // let obstruction_normal = hit_normal;
 
             for contact in &manifold.points {
                 let Ok((direction, magnitude)) =
@@ -302,7 +294,6 @@ pub(crate) fn depenetrate_character(
                     continue;
                 };
 
-                // let depth = contact.penetration * magnitude + character.skin_width;
                 let depth = contact.penetration * magnitude;
 
                 match overlaps.binary_search_by(|(_, d)| depth.total_cmp(&d)) {
@@ -324,14 +315,6 @@ pub(crate) fn depenetrate_character(
                 continue;
             }
 
-            // character.velocity = project_velocity(
-            //     character.velocity,
-            //     stable_ground,
-            //     obstruction_normal,
-            //     stable_on_hit,
-            //     *character.up,
-            // );
-
             character.velocity =
                 plane.project_velocity(character.velocity, ground_normal, character.up);
 
@@ -343,28 +326,21 @@ pub(crate) fn depenetrate_character(
             }
         }
 
-        let mut fixup = Vec3::ZERO;
-
         for i in 0..overlaps.len() {
             let (direction, depth) = overlaps[i];
-
-            let color = match depth > 0.0 {
-                true => CRIMSON,
-                false => LIGHT_GREEN,
-            };
-
-            gizmos.line_gradient(
-                transform.translation,
-                transform.translation - direction * depth,
-                color,
-                color.with_alpha(0.0),
-            );
 
             if depth <= 0.0 {
                 continue;
             }
 
-            fixup += direction * depth;
+            gizmos.line_gradient(
+                transform.translation,
+                transform.translation - direction * depth,
+                CRIMSON,
+                CRIMSON.with_alpha(0.0),
+            );
+
+            transform.translation += direction * depth;
 
             for j in i..overlaps.len() {
                 let (next_direction, ref mut next_depth) = overlaps[j];
@@ -373,19 +349,6 @@ pub(crate) fn depenetrate_character(
                 *next_depth -= fixed;
             }
         }
-
-        let Ok((direction, depth)) = Dir3::new_and_length(fixup) else {
-            continue;
-        };
-
-        gizmos.line_gradient(
-            transform.translation,
-            transform.translation + direction * depth,
-            WHITE,
-            WHITE.with_alpha(0.0),
-        );
-
-        transform.translation += direction * depth;
     }
 }
 
@@ -448,6 +411,7 @@ pub(crate) fn move_character(
     mut query: Query<(
         Entity,
         &mut Character,
+        &GroundingSettings,
         &mut Transform,
         &Collider,
         &ComputedMass,
@@ -462,6 +426,7 @@ pub(crate) fn move_character(
     for (
         entity,
         mut character,
+        grounding_settings,
         mut transform,
         collider,
         character_mass,
@@ -487,6 +452,7 @@ pub(crate) fn move_character(
                             point: transform.translation
                                 + character.feet_position(collider, transform.rotation),
                             normal: *ground.normal,
+                            is_walkable: true,
                         }),
                     },
                 );
@@ -502,16 +468,27 @@ pub(crate) fn move_character(
 
         let ground_normal = character.ground.map(|g| *g.normal);
 
+        assert_eq!(None, grounding_settings.layer_mask, "not yet implemented");
+
+        // When already grounded, add a small epsilon to make sure we don't randomly
+        // loose grip when the ground angle matches the max angle perfectly
+        let walkable_angle = match character.grounded() {
+            true => grounding_settings.max_angle + 0.01,
+            false => grounding_settings.max_angle,
+        };
+
         let out = collide_and_slide(
             collider,
             transform.translation,
             transform.rotation,
             character.velocity,
             ground_normal,
-            character.walkable_angle,
-            character.up,
-            8,
-            character.skin_width,
+            MovementConfig {
+                walkable_angle,
+                up: character.up,
+                max_slide_count: character.max_slide_count,
+                skin_width: character.skin_width,
+            },
             &filter.0,
             &spatial_query,
             duration,
@@ -540,7 +517,7 @@ pub(crate) fn move_character(
                         direction,
                         remaining_motion,
                         character.up,
-                        character.walkable_angle,
+                        grounding_settings.max_angle,
                         1.0,
                         0.1,
                         character.step_height,
@@ -586,6 +563,7 @@ pub(crate) fn move_character(
                                 hit: Some(DebugHit {
                                     point: hit.point1,
                                     normal: hit.normal1,
+                                    is_walkable: plane.is_walkable,
                                 }),
                             },
                         );
@@ -609,36 +587,34 @@ pub(crate) fn move_character(
                 new_translation,
                 transform.rotation,
                 character.up,
-                character.ground_check_distance,
+                grounding_settings.max_distance + 10.0,
                 character.skin_width,
-                character.walkable_angle + 0.01,
+                walkable_angle,
                 &spatial_query,
                 &filter.0,
             ) {
-                if character.grounded() {
-                    new_ground = Some(ground);
+                new_ground = Some(ground);
 
-                    let mut hit_roof = false;
+                let mut hit_roof = !grounding_settings.snapping_enabled;
 
-                    if ground_distance < 0.0 {
-                        if let Some(..) = sweep(
-                            collider,
-                            transform.translation,
-                            transform.rotation,
-                            character.up,
-                            -ground_distance,
-                            character.skin_width,
-                            &spatial_query,
-                            &filter.0,
-                            true,
-                        ) {
-                            hit_roof = true;
-                        }
+                if grounding_settings.snapping_enabled && ground_distance < 0.0 {
+                    if let Some(..) = sweep(
+                        collider,
+                        transform.translation,
+                        transform.rotation,
+                        character.up,
+                        -ground_distance,
+                        character.skin_width,
+                        &spatial_query,
+                        &filter.0,
+                        true,
+                    ) {
+                        hit_roof = true;
                     }
+                }
 
-                    if !hit_roof {
-                        new_translation -= character.up * ground_distance;
-                    }
+                if !hit_roof {
+                    new_translation -= character.up * ground_distance;
                 }
             } else {
                 new_ground = None;
@@ -664,6 +640,7 @@ pub(crate) fn move_character(
                         point: new_translation
                             + character.feet_position(collider, transform.rotation),
                         normal: *ground.normal,
+                        is_walkable: true,
                     }),
                 },
             );
@@ -679,18 +656,41 @@ pub(crate) fn move_character(
     Ok(())
 }
 
-pub(crate) struct CharacterVelocity {
-    pub movement: Vec3,
-    pub ground: Vec3,
+pub(crate) struct PlatformVelocity(pub Vec3);
+
+pub(crate) struct CharacterVelocity(pub Vec3);
+
+#[derive(Component, Reflect, Debug, Clone, Copy)]
+#[reflect(Component)]
+pub struct GroundingSettings {
+    /// Mask for walkable ground
+    pub layer_mask: Option<LayerMask>,
+    /// Max walkable angle
+    pub max_angle: f32,
+    /// Max distance from the ground
+    pub max_distance: f32,
+    pub snapping_enabled: bool,
 }
 
-pub(crate) struct GroundSettings {
-    /// mask for walkable ground
-    layers: Option<LayerMask>,
-    /// max walkable angle
-    max_angle: f32,
-    /// max distance from the ground
-    max_distance: f32,
+impl Default for GroundingSettings {
+    fn default() -> Self {
+        Self {
+            layer_mask: None,
+            max_angle: PI / 4.0,
+            max_distance: 0.2,
+            snapping_enabled: true,
+        }
+    }
+}
+
+pub(crate) enum SteppingBehaviour {
+    Never,
+    Grounded,
+    Always,
+}
+
+pub(crate) struct SteppingSettings {
+    max_height: f32,
 }
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
@@ -703,6 +703,7 @@ pub(crate) struct GroundSettings {
     MoveInput,
     MoveAcceleration,
     DebugMotion,
+    GroundingSettings,
 )]
 pub struct Character {
     pub velocity: Vec3,
@@ -711,10 +712,10 @@ pub struct Character {
     pub max_slide_count: u8,
     pub ground: Option<Ground>,
     pub previous_ground: Option<Ground>,
-    pub walkable_angle: f32,
-    pub ground_check_distance: f32,
+    // pub walkable_angle: f32,
+    // pub ground_check_distance: f32,
     pub step_height: f32,
-    pub snap_to_ground: bool,
+    // pub snap_to_ground: bool,
 }
 
 impl Default for Character {
@@ -726,10 +727,10 @@ impl Default for Character {
             max_slide_count: 8,
             ground: None,
             previous_ground: None,
-            walkable_angle: PI / 4.0,
-            ground_check_distance: 0.1,
+            // walkable_angle: PI / 4.0,
+            // ground_check_distance: 0.1,
             step_height: 0.3,
-            snap_to_ground: true,
+            // snap_to_ground: true,
         }
     }
 }

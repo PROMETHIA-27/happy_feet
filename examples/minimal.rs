@@ -9,7 +9,7 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterMovement, KinematicCharacterPlugin, MoveInput,
+    Character, CharacterMovement, GroundingSettings, KinematicCharacterPlugin, MoveInput,
     debug::{DebugMode, DebugMotion},
 };
 
@@ -107,9 +107,12 @@ fn setup(
         CollisionEventsEnabled,
         Character {
             skin_width: 0.1,
-            walkable_angle: PI / 4.0 + 0.1,
-            ground_check_distance: 0.2,
             step_height: 0.0,
+            ..Default::default()
+        },
+        GroundingSettings {
+            max_angle: PI / 4.0 + 0.1,
+            max_distance: 0.2,
             ..Default::default()
         },
         CollidingEntities::default(),
@@ -380,5 +383,5 @@ fn events_test(trigger: Trigger<OnCollisionStart>, query: Query<Entity, With<Cha
         return;
     }
 
-    println!("HELLO???");
+    info!("COLLISION STARTED");
 }

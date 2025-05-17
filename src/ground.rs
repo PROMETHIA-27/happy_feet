@@ -20,16 +20,11 @@ impl Ground {
     ) -> Option<Self> {
         let normal = normal.try_into().ok()?;
 
-        if !is_walkable(*normal, *up, walkable_angle) {
+        if !is_walkable(*normal, walkable_angle, *up) {
             return None;
         }
 
         Some(Self { entity, normal })
-    }
-
-    /// Returns `true` if the [`Ground`] is walkable with the given `walkable_angle` and `up` direction.
-    pub fn is_walkable(&self, up: Dir3, walkable_angle: f32) -> bool {
-        is_walkable(*self.normal, *up, walkable_angle)
     }
 }
 
@@ -62,6 +57,6 @@ pub(crate) fn ground_check(
     Some((distance, ground))
 }
 
-pub(crate) fn is_walkable(normal: Vec3, up: Vec3, walkable_angle: f32) -> bool {
+pub(crate) fn is_walkable(normal: Vec3, walkable_angle: f32, up: Vec3) -> bool {
     normal.angle_between(up) <= walkable_angle
 }

@@ -15,12 +15,10 @@ pub(crate) struct SurfacePlane {
 impl SurfacePlane {
     pub fn new(
         surface_normal: Vec3,
+        is_walkable: bool,
         ground_normal: Option<Vec3>,
-        walkable_angle: f32,
         up: Dir3,
     ) -> Self {
-        let is_walkable = is_walkable(surface_normal, *up, walkable_angle);
-
         let mut obstruction_normal = surface_normal;
 
         if !is_walkable {
@@ -85,21 +83,7 @@ pub(crate) enum CollisionState {
 
 impl CollisionState {
     #[must_use]
-    pub fn slide(
-        &mut self,
-        plane: SurfacePlane,
-        velocity: Vec3,
-        previous_velocity: Vec3,
-        ground_normal: Option<Vec3>,
-        up: Dir3,
-    ) -> Vec3 {
-        self.slide_with(plane, velocity, previous_velocity, ground_normal, |vel| {
-            plane.project_velocity(vel, ground_normal, up)
-        })
-    }
-
-    #[must_use]
-    pub fn slide_with(
+    pub fn project_velocity(
         &mut self,
         plane: SurfacePlane,
         velocity: Vec3,

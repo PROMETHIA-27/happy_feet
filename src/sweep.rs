@@ -118,7 +118,7 @@ pub(crate) fn step_check(
         filter,
         true,
     ) {
-        let is_walkable = is_walkable(hit.normal1, *up, walkable_angle - 1e-4);
+        let is_walkable = is_walkable(hit.normal1, walkable_angle, *up);
         if is_walkable {
             let down_offset = -up * distance;
             return Some((up_offset + forward_offset + down_offset, hit));
@@ -147,7 +147,8 @@ pub(crate) fn step_check(
         ) {
             let down_offset = -up * distance;
 
-            let is_walkable = is_walkable(hit.normal1, *up, walkable_angle - 1e-4);
+            //
+            let is_walkable = is_walkable(hit.normal1, walkable_angle - 0.01, *up);
 
             gizmos.line(
                 origin + up_offset + forward_offset,
@@ -194,6 +195,24 @@ pub(crate) struct MovementImpact {
     pub hit: ShapeHitData,
 }
 
+pub(crate) struct MovementConfig {
+    pub walkable_angle: f32,
+    pub up: Dir3,
+    pub max_slide_count: u8,
+    pub skin_width: f32,
+}
+
+impl Default for MovementConfig {
+    fn default() -> Self {
+        Self {
+            walkable_angle: PI / 4.0,
+            up: Dir3::Y,
+            max_slide_count: 4,
+            skin_width: 0.1,
+        }
+    }
+}
+
 /// If `on_hit` returns `true`, `project_velocity` will be called and the state velocity will be modified, otherwise it will be skipped.
 pub(crate) fn collide_and_slide(
     shape: &Collider,
@@ -201,10 +220,7 @@ pub(crate) fn collide_and_slide(
     rotation: Quat,
     velocity: Vec3,
     ground_normal: Option<Vec3>,
-    walkable_angle: f32,
-    up: Dir3,
-    max_slide_count: usize,
-    skin_width: f32,
+    config: MovementConfig,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
@@ -221,7 +237,7 @@ pub(crate) fn collide_and_slide(
 
     let mut collision_state = CollisionState::default();
 
-    for _ in 0..max_slide_count {
+    for _ in 0..config.max_slide_count {
         let Ok((direction, max_distance)) =
             Dir3::new_and_length(state.velocity * state.remaining_time)
         else {
@@ -236,7 +252,7 @@ pub(crate) fn collide_and_slide(
             rotation,
             direction,
             max_distance,
-            skin_width,
+            config.skin_width,
             spatial_query,
             filter,
             true,
@@ -250,7 +266,12 @@ pub(crate) fn collide_and_slide(
         state.offset += direction * distance;
 
         let end = origin + state.offset;
-        let plane = SurfacePlane::new(hit.normal1, ground_normal, walkable_angle, up);
+        let plane = SurfacePlane::new(
+            hit.normal1,
+            is_walkable(hit.normal1, config.walkable_angle, *config.up),
+            ground_normal,
+            config.up,
+        );
 
         if !on_hit(
             &mut state,
@@ -267,7 +288,7 @@ pub(crate) fn collide_and_slide(
             continue;
         }
 
-        state.velocity = collision_state.slide_with(
+        state.velocity = collision_state.project_velocity(
             plane,
             state.velocity,
             mem::replace(&mut previous_velocity, state.velocity),
