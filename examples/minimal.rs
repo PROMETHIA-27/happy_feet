@@ -10,6 +10,7 @@ use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
     Character, CharacterMovement, GroundingSettings, KinematicCharacterPlugin, MoveInput,
+    SteppingBehaviour, SteppingSettings,
     debug::{DebugMode, DebugMotion},
 };
 
@@ -30,7 +31,8 @@ fn main() -> AppExit {
         })
         .init_gizmo_group::<PhysicsGizmos>()
         .add_input_context::<Walking>()
-        .add_observer(events_test)
+        .add_observer(on_collision_events_start)
+        .add_observer(on_collision_events_end)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
@@ -107,8 +109,11 @@ fn setup(
         CollisionEventsEnabled,
         Character {
             skin_width: 0.1,
-            step_height: 0.0,
             ..Default::default()
+        },
+        SteppingSettings {
+            max_height: 0.4,
+            behaviour: SteppingBehaviour::Always,
         },
         GroundingSettings {
             max_angle: PI / 4.0 + 0.1,
@@ -378,10 +383,34 @@ fn sync_attachment_global_transforms(
     Ok(())
 }
 
-fn events_test(trigger: Trigger<OnCollisionStart>, query: Query<Entity, With<Character>>) {
+fn on_collision_events_start(
+    trigger: Trigger<OnCollisionStart>,
+    query: Query<Entity, With<Character>>,
+    names: Query<NameOrEntity>,
+) {
     if !query.contains(trigger.target()) {
         return;
     }
 
-    info!("COLLISION STARTED");
+    info!(
+        "COLLISION STARTED: {} <-> {}",
+        names.get(trigger.target()).unwrap(),
+        names.get(trigger.collider).unwrap(),
+    );
+}
+
+fn on_collision_events_end(
+    trigger: Trigger<OnCollisionStart>,
+    query: Query<Entity, With<Character>>,
+    names: Query<NameOrEntity>,
+) {
+    if !query.contains(trigger.target()) {
+        return;
+    }
+
+    info!(
+        "COLLISION ENDED: {} <-> {}",
+        names.get(trigger.target()).unwrap(),
+        names.get(trigger.collider).unwrap()
+    );
 }

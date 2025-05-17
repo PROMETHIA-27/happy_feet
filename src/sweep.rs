@@ -81,7 +81,7 @@ pub(crate) fn step_check(
 
     let up_offset = up * max_height;
 
-    gizmos.line(origin, origin + up_offset, BLACK);
+    // gizmos.line(origin, origin + up_offset, BLACK);
 
     // check for wall
     if let Some((distance, _)) = sweep(
@@ -98,11 +98,11 @@ pub(crate) fn step_check(
         max_forward = distance;
     }
 
-    gizmos.line(
-        origin + up_offset,
-        origin + up_offset + direction * max_forward,
-        BLACK,
-    );
+    // gizmos.line(
+    //     origin + up_offset,
+    //     origin + up_offset + direction * max_forward,
+    //     BLACK,
+    // );
 
     let forward_offset = direction * motion.min(max_forward);
 
@@ -131,7 +131,7 @@ pub(crate) fn step_check(
 
     let mut result = None;
 
-    for i in 0..8 {
+    for _ in 0..8 {
         let forward_offset = direction * forward;
 
         if let Some((distance, hit)) = sweep(
@@ -150,17 +150,17 @@ pub(crate) fn step_check(
             //
             let is_walkable = is_walkable(hit.normal1, walkable_angle - 0.01, *up);
 
-            gizmos.line(
-                origin + up_offset + forward_offset,
-                origin + up_offset + forward_offset + down_offset,
-                match is_walkable {
-                    true => match i == 7 {
-                        true => LIGHT_GREEN,
-                        false => GREEN,
-                    },
-                    false => CRIMSON,
-                },
-            );
+            // gizmos.line(
+            //     origin + up_offset + forward_offset,
+            //     origin + up_offset + forward_offset + down_offset,
+            //     match is_walkable {
+            //         true => match i == 7 {
+            //             true => LIGHT_GREEN,
+            //             false => GREEN,
+            //         },
+            //         false => CRIMSON,
+            //     },
+            // );
 
             if is_walkable {
                 result = Some((up_offset + forward_offset + down_offset, hit));

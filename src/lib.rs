@@ -412,6 +412,7 @@ pub(crate) fn move_character(
         Entity,
         &mut Character,
         &GroundingSettings,
+        &SteppingSettings,
         &mut Transform,
         &Collider,
         &ComputedMass,
@@ -421,12 +422,15 @@ pub(crate) fn move_character(
         Has<DebugMode>,
     )>,
     mut bodies: Query<(&mut LinearVelocity, &ComputedMass, &RigidBody)>,
+    mut collision_started_events: EventWriter<CollisionStarted>,
+    mut collision_ended_events: EventWriter<CollisionEnded>,
     time: Res<Time>,
 ) -> Result {
     for (
         entity,
         mut character,
         grounding_settings,
+        stepping_settings,
         mut transform,
         collider,
         character_mass,
@@ -508,7 +512,13 @@ pub(crate) fn move_character(
                  plane,
                  ..
              }| {
-                if !plane.is_walkable && character.grounded() {
+                let try_step = match stepping_settings.behaviour {
+                    SteppingBehaviour::Never => false,
+                    SteppingBehaviour::Grounded => !plane.is_walkable && character.grounded(),
+                    SteppingBehaviour::Always => !plane.is_walkable,
+                };
+
+                if try_step {
                     if let Some((offset, hit)) = step_check(
                         &mut gizmos,
                         collider,
@@ -520,7 +530,7 @@ pub(crate) fn move_character(
                         grounding_settings.max_angle,
                         1.0,
                         0.1,
-                        character.step_height,
+                        stepping_settings.max_height,
                         character.skin_width,
                         &spatial_query,
                         &filter.0,
@@ -535,6 +545,8 @@ pub(crate) fn move_character(
                         return false;
                     }
                 }
+
+                collision_started_events.write(CollisionStarted(entity, hit.entity));
 
                 if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
                     if other_body.is_dynamic() {
@@ -587,7 +599,7 @@ pub(crate) fn move_character(
                 new_translation,
                 transform.rotation,
                 character.up,
-                grounding_settings.max_distance + 10.0,
+                grounding_settings.max_distance,
                 character.skin_width,
                 walkable_angle,
                 &spatial_query,
@@ -683,14 +695,26 @@ impl Default for GroundingSettings {
     }
 }
 
-pub(crate) enum SteppingBehaviour {
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SteppingBehaviour {
     Never,
     Grounded,
     Always,
 }
 
-pub(crate) struct SteppingSettings {
-    max_height: f32,
+#[derive(Component, Debug, PartialEq, Clone, Copy)]
+pub struct SteppingSettings {
+    pub max_height: f32,
+    pub behaviour: SteppingBehaviour,
+}
+
+impl Default for SteppingSettings {
+    fn default() -> Self {
+        Self {
+            max_height: 0.25,
+            behaviour: SteppingBehaviour::Grounded,
+        }
+    }
 }
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
@@ -704,6 +728,7 @@ pub(crate) struct SteppingSettings {
     MoveAcceleration,
     DebugMotion,
     GroundingSettings,
+    SteppingSettings,
 )]
 pub struct Character {
     pub velocity: Vec3,
@@ -714,7 +739,7 @@ pub struct Character {
     pub previous_ground: Option<Ground>,
     // pub walkable_angle: f32,
     // pub ground_check_distance: f32,
-    pub step_height: f32,
+    // pub step_height: f32,
     // pub snap_to_ground: bool,
 }
 
@@ -729,7 +754,7 @@ impl Default for Character {
             previous_ground: None,
             // walkable_angle: PI / 4.0,
             // ground_check_distance: 0.1,
-            step_height: 0.3,
+            // step_height: 0.3,
             // snap_to_ground: true,
         }
     }
