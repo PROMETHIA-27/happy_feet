@@ -10,8 +10,8 @@ use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
     Character, CharacterMovement, GroundingSettings, KinematicCharacterPlugin, MoveInput,
-    SteppingBehaviour, SteppingSettings,
-    debug::{DebugMode, DebugMotion},
+    OnGroundEnter, OnGroundLeave, SteppingBehaviour, SteppingSettings,
+    debug::{DebugInput, DebugMode, DebugMotion},
 };
 
 fn main() -> AppExit {
@@ -33,6 +33,8 @@ fn main() -> AppExit {
         .add_input_context::<Walking>()
         .add_observer(on_collision_events_start)
         .add_observer(on_collision_events_end)
+        .add_observer(on_ground_enter)
+        .add_observer(on_ground_leave)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
@@ -108,6 +110,8 @@ fn setup(
         MovementMode::Walking,
         CollisionEventsEnabled,
         // Sensor,
+        DebugMotion::default(),
+        DebugInput,
         Character {
             skin_width: 0.1,
             ..Default::default()
@@ -115,13 +119,14 @@ fn setup(
         SteppingSettings {
             max_height: 0.4,
             behaviour: SteppingBehaviour::Always,
+            ..Default::default()
         },
         GroundingSettings {
             max_angle: PI / 4.0 + 0.1,
             max_distance: 0.2,
             ..Default::default()
         },
-        CollidingEntities::default(),
+        walking_actions(),
         Mass(10.0),
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
@@ -135,7 +140,6 @@ fn setup(
             rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },
-        walking_actions(),
         Attachments::spawn_one((
             PlayerCamera {
                 eye_height: 0.5,
@@ -296,7 +300,7 @@ fn on_jump(
 fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
     for (mut character, mode) in &mut query {
         if let MovementMode::Flying = mode {
-            character.ground = None;
+            // character.ground = None;
         }
     }
 }
@@ -414,4 +418,12 @@ fn on_collision_events_end(
         names.get(trigger.target()).unwrap(),
         names.get(trigger.collider).unwrap()
     );
+}
+
+fn on_ground_enter(_: Trigger<OnGroundEnter>) {
+    info!("ENTERED GROUND");
+}
+
+fn on_ground_leave(_: Trigger<OnGroundLeave>) {
+    info!("LEFT GROUND");
 }

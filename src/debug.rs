@@ -21,22 +21,29 @@ pub(crate) fn plugin(app: &mut App) {
 
     app.add_systems(
         FixedPostUpdate,
-        (draw_input_arrow, draw_debug_motion).after(move_character),
+        (draw_input_arrow, draw_motion).after(move_character),
     );
 }
 
 #[derive(GizmoConfigGroup, Reflect, Default)]
 pub(crate) struct CharacterGizmos;
 
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+pub struct DebugInput;
+
 fn draw_input_arrow(
     mut gizmos: Gizmos<CharacterGizmos>,
-    query: Query<(
-        &Transform,
-        &Character,
-        &CharacterMovement,
-        &Collider,
-        &MoveInput,
-    )>,
+    query: Query<
+        (
+            &Transform,
+            &Character,
+            &CharacterMovement,
+            &Collider,
+            &MoveInput,
+        ),
+        With<DebugInput>,
+    >,
 ) {
     for (transform, character, movement, collider, move_input) in &query {
         let half_height = collider
@@ -129,7 +136,7 @@ impl DebugMotion {
     }
 }
 
-fn draw_debug_motion(
+fn draw_motion(
     mut gizmos: Gizmos<CharacterGizmos>,
     mut query: Query<(
         &Character,
@@ -262,13 +269,15 @@ fn draw_debug_motion(
             debug_motion.clear();
         } else {
             // Only draw last point at character if debug mode is disabled
+            let ground_normal = character.grounding.normal();
+
             dbg_point(DebugPoint {
                 translation: transform.translation,
                 velocity: character.velocity,
-                hit: character.ground.map(|ground| DebugHit {
+                hit: ground_normal.map(|normal| DebugHit {
                     point: transform.translation
                         + character.feet_position(collider, transform.rotation),
-                    normal: *ground.normal,
+                    normal: *normal,
                     is_walkable: true,
                 }),
             });

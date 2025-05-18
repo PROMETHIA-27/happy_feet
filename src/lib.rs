@@ -1,15 +1,10 @@
 use std::f32::consts::PI;
 
 use avian3d::prelude::*;
-use bevy::{
-    color::palettes::css::{CRIMSON, LIGHT_GREEN, WHITE},
-    ecs::entity::EntityHashSet,
-    input::InputSystem,
-    prelude::*,
-};
+use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
-use ground::{Ground, ground_check, is_walkable};
-use projection::{CollisionState, SurfacePlane};
+use ground::{CharacterGrounding, GroundSurface, ground_check, is_walkable};
+use projection::{CollisionState, Surface, align_with_surface, project_velocity};
 use sweep::{MovementConfig, MovementImpact, collide_and_slide, step_check, sweep};
 
 pub mod debug;
@@ -27,13 +22,7 @@ impl Plugin for KinematicCharacterPlugin {
 
         app.add_systems(
             FixedUpdate,
-            (
-                character_forces,
-                update_character_filter,
-                movement_input,
-                movement_acceleration,
-            )
-                .chain(),
+            (character_forces, update_character_filter, movement_input).chain(),
         );
 
         app.add_systems(
@@ -48,25 +37,16 @@ impl Plugin for KinematicCharacterPlugin {
             PhysicsSchedule,
             depenetrate_character.in_set(NarrowPhaseSet::Last),
         );
-
-        // app.add_systems(
-        //     PhysicsSchedule,
-        //     (
-        //         // character_depenetrate.in_set(NarrowPhaseSet::Update),
-        //         character_movement.in_set(PhysicsStepSet::Last),
-        //     ),
-        // );
     }
 }
 
 pub(crate) fn update_character_filter(
     mut query: Query<(Entity, &mut CharacterFilter, &CollisionLayers)>,
     sensors: Query<Entity, With<Sensor>>,
-    // bodies: Query<(Entity, &RigidBody)>,
 ) {
     for (entity, mut filter, collidion_layers) in &mut query {
         // Filter out any entities that's not in the character's collision filter
-        filter.0.mask = collidion_layers.filters.into();
+        filter.0.mask = collidion_layers.filters;
 
         // Filter out all sensor entities along with the character entity
         filter.0.excluded_entities.clear();
@@ -74,13 +54,6 @@ pub(crate) fn update_character_filter(
             .0
             .excluded_entities
             .extend(sensors.iter().chain([entity]));
-
-        // filter.0.excluded_entities.extend(
-        //     bodies
-        //         .iter()
-        //         .filter(|(_, r)| r.is_dynamic())
-        //         .map(|(e, _)| e),
-        // );
     }
 }
 
@@ -113,19 +86,19 @@ pub(crate) fn movement_input(
     mut query: Query<(
         &MoveInput,
         &mut MoveAcceleration,
-        &Character,
+        &mut Character,
         &CharacterMovement,
         Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
-    for (move_input, mut move_acceleration, character, movement, debug_mode) in &mut query {
+    for (move_input, mut move_acceleration, mut character, movement, debug_mode) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
 
         if debug_mode {
-            move_acceleration.0 = direction * movement.target_speed * throttle;
+            character.velocity = direction * movement.target_speed * throttle;
             continue;
         }
 
@@ -134,112 +107,22 @@ pub(crate) fn movement_input(
             false => movement.air_acceleratin,
         };
 
-        move_acceleration.0 += acceleration(
+        let mut move_accel = acceleration(
             character.velocity,
             *direction,
             max_acceleration * throttle,
             movement.target_speed * throttle,
             time.delta_secs(),
         );
-    }
-}
 
-pub(crate) fn movement_acceleration(
-    spatial_query: SpatialQuery,
-    mut query: Query<(
-        &mut MoveAcceleration,
-        &mut Character,
-        &mut Transform,
-        &Collider,
-        &CharacterFilter,
-        Has<Sensor>,
-        Has<DebugMode>,
-    )>,
-    time: Res<Time>,
-) {
-    for (mut move_accel, mut character, mut transform, collider, filter, is_sensor, debug_mode) in
-        &mut query
-    {
-        let mut move_accel = move_accel.take();
-
-        // if let Some(ground) = character.ground {
-        //     // move_accel = move_accel.reject_from_normalized(*ground.normal);
-        //     move_accel = project_motion_on_ground(move_accel, ground.normal, character.up);
-        // }
-
-        if debug_mode {
-            character.velocity = move_accel;
-            continue;
-        }
-
-        if is_sensor {
-            character.velocity += move_accel;
-            continue;
+        if let Some(ground) = character.grounding.stable_surface() {
+            move_accel = align_with_surface(move_accel, *ground.normal, *character.up);
         }
 
         character.velocity += move_accel;
-        continue;
-
-        // Sweep in the movement direction to find a plane to project acceleration on
-        // This is a seperate step because trying to do this in the `move_and_slide` callback
-        // results in "sticking" to the wall rather than sliding down at the expected rate
-        // let Ok(original_direction) = Dir3::new(move_accel) else {
-        //     continue;
-        // };
-
-        // let out = collide_and_slide(
-        //     collider,
-        //     transform.translation,
-        //     transform.rotation,
-        //     move_accel,
-        //     8,
-        //     character.skin_width,
-        //     &filter.0,
-        //     &spatial_query,
-        //     time.delta_secs(),
-        //     |state, CollideImpact { hit, .. }| {
-        //         if let Some(ground) = Ground::new_if_walkable(
-        //             hit.entity,
-        //             hit.normal1,
-        //             character.up,
-        //             character.walkable_angle,
-        //         ) {
-        //             character.ground = Some(ground);
-        //         }
-
-        //         if planes.push(hit.normal1) {
-        //             if planes.is_corner() {
-        //                 state.velocity = Vec3::ZERO;
-        //                 return false;
-        //             }
-
-        //             for normal in planes.normals() {
-        //                 if is_walkable(hit.normal1, *character.up, character.walkable_angle) {
-        //                     state.velocity =
-        //                         project_motion_on_ground(state.velocity, normal, character.up);
-        //                 } else {
-        //                     state.velocity =
-        //                         project_motion_on_wall(state.velocity, normal, character.up);
-        //                 }
-        //             }
-
-        //             for crease in planes.creases() {
-        //                 state.velocity = state.velocity.project_onto_normalized(*crease);
-        //             }
-        //         }
-
-        //         false
-        //     },
-        // );
-
-        // transform.translation += out.offset;
-        // move_accel = out.velocity;
-
-        // character.velocity += move_accel;
     }
 }
 
-// FIXME: doesn't work
 pub(crate) fn depenetrate_character(
     mut overlaps: Local<Vec<(Dir3, f32)>>,
     mut gizmos: Gizmos<CharacterGizmos>,
@@ -278,35 +161,27 @@ pub(crate) fn depenetrate_character(
                 false => manifold.normal,
             };
 
-            let ground_normal = character.ground.map(|g| *g.normal);
+            let ground_normal = character.grounding.normal();
 
-            let plane = SurfacePlane::new(
-                hit_normal,
-                is_walkable(hit_normal, grounding_settings.max_angle, *character.up),
-                ground_normal,
-                character.up,
-            );
+            let surface = Surface::new(hit_normal, grounding_settings.max_angle, character.up);
+            let obstruction_normal = surface
+                .obstruction_normal(ground_normal, character.up)
+                .unwrap();
 
             for contact in &manifold.points {
-                let Ok((direction, magnitude)) =
-                    Dir3::new_and_length(hit_normal.project_onto(plane.obstruction_normal))
-                else {
-                    continue;
-                };
+                let depth = contact.penetration * hit_normal.dot(*obstruction_normal);
 
-                let depth = contact.penetration * magnitude;
-
-                match overlaps.binary_search_by(|(_, d)| depth.total_cmp(&d)) {
+                match overlaps.binary_search_by(|(_, d)| depth.total_cmp(d)) {
                     Ok(index) => {
-                        if overlaps[index].0.dot(*direction) > 1.0 - 1e-4 {
-                            overlaps.push((direction, depth));
+                        if overlaps[index].0.dot(*obstruction_normal) > 1.0 - 1e-4 {
+                            overlaps.push((obstruction_normal, depth));
                             overlaps.swap_remove(index);
                         } else {
-                            overlaps.insert(index, (direction, depth));
+                            overlaps.insert(index, (obstruction_normal, depth));
                         }
                     }
                     Err(index) => {
-                        overlaps.insert(index, (direction, depth));
+                        overlaps.insert(index, (obstruction_normal, depth));
                     }
                 }
             }
@@ -315,14 +190,16 @@ pub(crate) fn depenetrate_character(
                 continue;
             }
 
-            character.velocity =
-                plane.project_velocity(character.velocity, ground_normal, character.up);
+            character.velocity = project_velocity(
+                character.velocity,
+                *obstruction_normal,
+                surface.is_walkable,
+                ground_normal,
+                character.up,
+            );
 
-            if plane.is_walkable {
-                character.ground = Some(Ground {
-                    entity: other,
-                    normal: Dir3::new(hit_normal).unwrap(),
-                });
+            if surface.is_walkable {
+                character.grounding = GroundSurface::new(other, hit_normal).into();
             }
         }
 
@@ -392,8 +269,6 @@ fn physics_interactions(
             continue;
         };
 
-        // transform.translation += direction * distance;
-
         if other_body.is_dynamic() {
             let remaining = max_distance - distance;
 
@@ -407,9 +282,21 @@ fn physics_interactions(
     }
 }
 
+/// Triggered when the character becomes grounded during a movement update.
+///
+/// This is only triggered for the last ground the character touched during the update and will not be triggered
+/// if the character was already grounded prior to the start of the update.
+#[derive(Event, Deref)]
+pub struct OnGroundEnter(pub GroundSurface);
+
+/// Triggered when the character becomes ungrounded during a movement update.
+///
+/// This is only triggered if the character is ungrounded at the end of the update.
+#[derive(Event, Deref)]
+pub struct OnGroundLeave(pub GroundSurface);
+
 pub(crate) fn move_character(
     mut commands: Commands,
-    mut gizmos: Gizmos<CharacterGizmos>,
     spatial_query: SpatialQuery,
     mut query: Query<(
         Entity,
@@ -448,6 +335,8 @@ pub(crate) fn move_character(
             continue;
         }
 
+        let current_ground_normal = character.grounding.normal();
+
         if debug_mode {
             if let Some(lines) = debug_motion.as_mut() {
                 lines.push(
@@ -455,10 +344,10 @@ pub(crate) fn move_character(
                     DebugPoint {
                         translation: transform.translation,
                         velocity: character.velocity,
-                        hit: character.ground.map(|ground| DebugHit {
+                        hit: current_ground_normal.map(|normal| DebugHit {
                             point: transform.translation
                                 + character.feet_position(collider, transform.rotation),
-                            normal: *ground.normal,
+                            normal: *normal,
                             is_walkable: true,
                         }),
                     },
@@ -466,16 +355,19 @@ pub(crate) fn move_character(
             }
         }
 
-        let mut new_ground = None;
-
         let duration = match debug_mode {
             true => 1.0,
             false => time.delta_secs(),
         };
 
-        let ground_normal = character.ground.map(|g| *g.normal);
-
-        assert_eq!(None, grounding_settings.layer_mask, "not yet implemented");
+        assert_eq!(
+            None, grounding_settings.layer_mask,
+            "custom layer masks for walkable ground is not supported"
+        );
+        assert_eq!(
+            None, stepping_settings.layer_mask,
+            "custom layer masks for steppable surfaces are not supported"
+        );
 
         // When already grounded, add a small epsilon to make sure we don't randomly
         // loose grip when the ground angle matches the max angle perfectly
@@ -484,15 +376,15 @@ pub(crate) fn move_character(
             false => grounding_settings.max_angle,
         };
 
-        let out = collide_and_slide(
+        let mut movement = collide_and_slide(
             collider,
             transform.translation,
             transform.rotation,
             character.velocity,
-            ground_normal,
+            current_ground_normal,
             MovementConfig {
                 walkable_angle,
-                up: character.up,
+                up_direction: character.up,
                 max_slide_count: character.max_slide_count,
                 skin_width: character.skin_width,
             },
@@ -500,52 +392,49 @@ pub(crate) fn move_character(
             &spatial_query,
             duration,
             |velocity, surface| {
-                surface.project_velocity(
-                    velocity,
-                    character.ground.map(|g| *g.normal),
-                    character.up,
-                )
+                surface.project_velocity(velocity, current_ground_normal, character.up)
             },
             |state,
              MovementImpact {
-                 hit,
                  end,
                  direction,
                  remaining_motion,
-                 plane,
+                 surface,
+                 hit,
                  ..
              }| {
                 let try_step = match stepping_settings.behaviour {
                     SteppingBehaviour::Never => false,
-                    SteppingBehaviour::Grounded => !plane.is_walkable && character.grounded(),
-                    SteppingBehaviour::Always => !plane.is_walkable,
+                    SteppingBehaviour::Grounded => !surface.is_walkable && character.grounded(),
+                    SteppingBehaviour::Always => !surface.is_walkable,
                 };
 
                 if try_step {
-                    if let Some((offset, hit)) = step_check(
-                        &mut gizmos,
-                        collider,
-                        end,
-                        transform.rotation,
-                        direction,
-                        remaining_motion,
-                        character.up,
-                        grounding_settings.max_angle,
-                        1.0,
-                        0.1,
-                        stepping_settings.max_height,
-                        character.skin_width,
-                        &spatial_query,
-                        &filter.0,
+                    if let Ok((direction, motion)) = Dir3::new_and_length(
+                        direction.reject_from(*character.up) * remaining_motion,
                     ) {
-                        new_ground = Some(Ground {
-                            entity: hit.entity,
-                            normal: hit.normal1.try_into().unwrap(),
-                        });
+                        if let Some((offset, hit)) = step_check(
+                            collider,
+                            end,
+                            transform.rotation,
+                            direction,
+                            motion,
+                            character.up,
+                            grounding_settings.max_angle,
+                            1.0,
+                            0.1,
+                            stepping_settings.max_height,
+                            character.skin_width,
+                            &spatial_query,
+                            &filter.0,
+                        ) {
+                            state.velocity =
+                                align_with_surface(state.velocity, hit.normal1, *character.up);
+                            state.ground = Some(GroundSurface::new(hit.entity, hit.normal1));
+                            state.offset += offset;
 
-                        state.offset += offset;
-
-                        return false;
+                            return false;
+                        }
                     }
                 }
 
@@ -564,13 +453,6 @@ pub(crate) fn move_character(
                     }
                 }
 
-                if plane.is_walkable {
-                    new_ground = Some(Ground {
-                        entity: hit.entity,
-                        normal: Dir3::new(hit.normal1).unwrap(),
-                    });
-                }
-
                 if debug_mode {
                     if let Some(lines) = debug_motion.as_mut() {
                         let duration = duration - state.remaining_time;
@@ -582,7 +464,7 @@ pub(crate) fn move_character(
                                 hit: Some(DebugHit {
                                     point: hit.point1,
                                     normal: hit.normal1,
-                                    is_walkable: plane.is_walkable,
+                                    is_walkable: surface.is_walkable,
                                 }),
                             },
                         );
@@ -593,14 +475,14 @@ pub(crate) fn move_character(
             },
         );
 
-        let mut new_translation = transform.translation + out.offset;
-        let new_velocity = out.velocity;
+        let mut new_translation = transform.translation + movement.offset;
 
-        if !character.grounded() && character.velocity.dot(*character.up) > 1e-4 {
-            new_ground = None;
-        }
+        // This causes the character to not become grounded when landing on ramps and velocity is pointing up
+        // if !character.grounded() && character.velocity.dot(*character.up) > 1e-4 {
+        //     movement.ground = None;
+        // }
 
-        if character.grounded() || new_ground.is_some() {
+        if character.grounded() || movement.ground.is_some() {
             if let Some((ground_distance, ground)) = ground_check(
                 collider,
                 new_translation,
@@ -612,12 +494,12 @@ pub(crate) fn move_character(
                 &spatial_query,
                 &filter.0,
             ) {
-                new_ground = Some(ground);
+                movement.ground = Some(ground);
 
                 let mut hit_roof = !grounding_settings.snapping_enabled;
 
                 if grounding_settings.snapping_enabled && ground_distance < 0.0 {
-                    if let Some(..) = sweep(
+                    hit_roof = sweep(
                         collider,
                         transform.translation,
                         transform.rotation,
@@ -627,22 +509,31 @@ pub(crate) fn move_character(
                         &spatial_query,
                         &filter.0,
                         true,
-                    ) {
-                        hit_roof = true;
-                    }
+                    )
+                    .is_some();
                 }
 
                 if !hit_roof {
                     new_translation -= character.up * ground_distance;
                 }
             } else {
-                new_ground = None;
+                movement.ground = None;
             }
         }
 
+        match (character.grounding.inner_surface, movement.ground) {
+            (Some(ground), None) => {
+                commands.entity(entity).trigger(OnGroundLeave(ground));
+            }
+            (None, Some(ground)) => {
+                commands.entity(entity).trigger(OnGroundEnter(ground));
+            }
+            _ => {}
+        }
+
         let draw_line = debug_mode
-            || debug_motion.as_ref().map_or(false, |lines| {
-                lines.points.back().map_or(true, |(_, point)| {
+            || debug_motion.as_ref().is_some_and(|lines| {
+                lines.points.back().is_none_or(|(_, point)| {
                     point.translation.distance_squared(new_translation) > 0.5
                 })
             });
@@ -651,11 +542,11 @@ pub(crate) fn move_character(
             let lines = debug_motion.as_mut().unwrap();
 
             lines.push(
-                out.remaining_time,
+                movement.remaining_time,
                 DebugPoint {
                     translation: new_translation,
-                    velocity: new_velocity,
-                    hit: new_ground.map(|ground| DebugHit {
+                    velocity: movement.velocity,
+                    hit: movement.ground.map(|ground| DebugHit {
                         point: new_translation
                             + character.feet_position(collider, transform.rotation),
                         normal: *ground.normal,
@@ -667,15 +558,19 @@ pub(crate) fn move_character(
 
         if !debug_mode {
             transform.translation = new_translation;
-            character.velocity = new_velocity;
-            character.ground = new_ground;
+            character.velocity = movement.velocity;
+
+            character.grounding = CharacterGrounding::new(movement.ground);
         }
     }
 
     Ok(())
 }
 
-pub(crate) struct PlatformVelocity(pub Vec3);
+pub(crate) struct PlatformVelocity {
+    pub current: Vec3,
+    pub previous: Vec3,
+}
 
 pub(crate) struct CharacterVelocity(pub Vec3);
 
@@ -711,6 +606,7 @@ pub enum SteppingBehaviour {
 
 #[derive(Component, Debug, PartialEq, Clone, Copy)]
 pub struct SteppingSettings {
+    pub layer_mask: Option<LayerMask>,
     pub max_height: f32,
     pub behaviour: SteppingBehaviour,
 }
@@ -718,6 +614,7 @@ pub struct SteppingSettings {
 impl Default for SteppingSettings {
     fn default() -> Self {
         Self {
+            layer_mask: None,
             max_height: 0.25,
             behaviour: SteppingBehaviour::Grounded,
         }
@@ -733,7 +630,6 @@ impl Default for SteppingSettings {
     CharacterMovement,
     MoveInput,
     MoveAcceleration,
-    DebugMotion,
     GroundingSettings,
     SteppingSettings,
 )]
@@ -742,12 +638,8 @@ pub struct Character {
     pub up: Dir3,
     pub skin_width: f32,
     pub max_slide_count: u8,
-    pub ground: Option<Ground>,
-    pub previous_ground: Option<Ground>,
-    // pub walkable_angle: f32,
-    // pub ground_check_distance: f32,
-    // pub step_height: f32,
-    // pub snap_to_ground: bool,
+    pub grounding: CharacterGrounding,
+    pub previous_ground: Option<GroundSurface>,
 }
 
 impl Default for Character {
@@ -757,12 +649,8 @@ impl Default for Character {
             up: Dir3::Y,
             skin_width: 0.02,
             max_slide_count: 8,
-            ground: None,
+            grounding: CharacterGrounding::default(),
             previous_ground: None,
-            // walkable_angle: PI / 4.0,
-            // ground_check_distance: 0.1,
-            // step_height: 0.3,
-            // snap_to_ground: true,
         }
     }
 }
@@ -770,10 +658,10 @@ impl Default for Character {
 impl Character {
     /// Launch the character, clearing the grounded state if launched away from the `ground` normal.
     pub fn launch(&mut self, impulse: Vec3) {
-        if let Some(ground) = self.ground {
+        if let Some(ground) = self.grounding.stable_surface() {
             // Clear grounded if launched away from the ground
             if ground.normal.dot(impulse) > 0.0 {
-                self.ground = None;
+                self.grounding.detach_from_surface();
             }
         }
 
@@ -786,22 +674,26 @@ impl Character {
         self.velocity = self.velocity.reject_from(*self.up);
 
         // Push the character away from ramps
-        if let Some(ground) = self.ground.take() {
-            self.velocity -= ground.normal * self.velocity.dot(*ground.normal).min(0.0);
+        if let Some(ground) = self.grounding.detach_from_surface() {
+            let impulse = ground.normal * self.velocity.dot(*ground.normal).min(0.0);
+
+            let vertical = impulse.project_onto(*self.up);
+            let mut horizontal = impulse - vertical;
+
+            // Reorient horizontal impulse to original velocity direction
+            if let Ok(direction) = Dir3::new(self.velocity) {
+                horizontal = horizontal.project_onto(*direction);
+            }
+
+            self.velocity -= horizontal + vertical;
         }
 
         self.velocity += self.up * impulse;
     }
 
-    /// Set the current ground and update the prevoius ground with the old value
-    pub fn set_ground(&mut self, ground: Option<Ground>) {
-        self.previous_ground = self.ground;
-        self.ground = ground;
-    }
-
     /// Returns `true` if the character is standing on the ground.
     pub fn grounded(&self) -> bool {
-        self.ground.is_some()
+        self.grounding.is_stable()
     }
 
     pub fn feet_position(&self, shape: &Collider, rotation: Quat) -> Vec3 {

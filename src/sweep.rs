@@ -1,12 +1,9 @@
-use std::{f32::consts::PI, mem, ops::Range};
+use std::{f32::consts::PI, mem};
 
 use avian3d::prelude::*;
-use bevy::{
-    color::palettes::css::{BLACK, CRIMSON, GREEN, LIGHT_GREEN, RED, WHITE},
-    prelude::*,
-};
+use bevy::prelude::*;
 
-use crate::{CharacterGizmos, CollisionState, SurfacePlane, is_walkable};
+use crate::{CollisionState, ground::GroundSurface, is_walkable, projection::Surface};
 
 /// Result of the move_and_slide function.
 
@@ -45,7 +42,6 @@ pub(crate) fn sweep(
 }
 
 pub(crate) fn step_check(
-    gizmos: &mut Gizmos<CharacterGizmos>,
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,
@@ -81,8 +77,6 @@ pub(crate) fn step_check(
 
     let up_offset = up * max_height;
 
-    // gizmos.line(origin, origin + up_offset, BLACK);
-
     // check for wall
     if let Some((distance, _)) = sweep(
         shape,
@@ -97,12 +91,6 @@ pub(crate) fn step_check(
     ) {
         max_forward = distance;
     }
-
-    // gizmos.line(
-    //     origin + up_offset,
-    //     origin + up_offset + direction * max_forward,
-    //     BLACK,
-    // );
 
     let forward_offset = direction * motion.min(max_forward);
 
@@ -147,20 +135,7 @@ pub(crate) fn step_check(
         ) {
             let down_offset = -up * distance;
 
-            //
             let is_walkable = is_walkable(hit.normal1, walkable_angle - 0.01, *up);
-
-            // gizmos.line(
-            //     origin + up_offset + forward_offset,
-            //     origin + up_offset + forward_offset + down_offset,
-            //     match is_walkable {
-            //         true => match i == 7 {
-            //             true => LIGHT_GREEN,
-            //             false => GREEN,
-            //         },
-            //         false => CRIMSON,
-            //     },
-            // );
 
             if is_walkable {
                 result = Some((up_offset + forward_offset + down_offset, hit));
@@ -182,6 +157,7 @@ pub(crate) struct MovementState {
     pub velocity: Vec3,
     pub offset: Vec3,
     pub remaining_time: f32,
+    pub ground: Option<GroundSurface>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -191,13 +167,13 @@ pub(crate) struct MovementImpact {
     pub direction: Dir3,
     pub incoming_motion: f32,
     pub remaining_motion: f32,
-    pub plane: SurfacePlane,
+    pub surface: Surface,
     pub hit: ShapeHitData,
 }
 
 pub(crate) struct MovementConfig {
     pub walkable_angle: f32,
-    pub up: Dir3,
+    pub up_direction: Dir3,
     pub max_slide_count: u8,
     pub skin_width: f32,
 }
@@ -206,7 +182,7 @@ impl Default for MovementConfig {
     fn default() -> Self {
         Self {
             walkable_angle: PI / 4.0,
-            up: Dir3::Y,
+            up_direction: Dir3::Y,
             max_slide_count: 4,
             skin_width: 0.1,
         }
@@ -219,18 +195,19 @@ pub(crate) fn collide_and_slide(
     origin: Vec3,
     rotation: Quat,
     velocity: Vec3,
-    ground_normal: Option<Vec3>,
+    current_ground_normal: Option<Dir3>,
     config: MovementConfig,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
-    mut project_velocity: impl FnMut(Vec3, SurfacePlane) -> Vec3,
+    mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
     mut on_hit: impl FnMut(&mut MovementState, MovementImpact) -> bool,
 ) -> MovementState {
     let mut state = MovementState {
         velocity,
         offset: Vec3::ZERO,
         remaining_time: delta,
+        ground: None,
     };
 
     let mut previous_velocity = state.velocity;
@@ -265,35 +242,32 @@ pub(crate) fn collide_and_slide(
         state.remaining_time *= 1.0 - distance / max_distance;
         state.offset += direction * distance;
 
-        let end = origin + state.offset;
-        let plane = SurfacePlane::new(
-            hit.normal1,
-            is_walkable(hit.normal1, config.walkable_angle, *config.up),
-            ground_normal,
-            config.up,
-        );
+        let surface = Surface::new(hit.normal1, config.walkable_angle, config.up_direction);
 
-        if !on_hit(
-            &mut state,
-            MovementImpact {
-                start,
-                end,
-                direction,
-                incoming_motion: distance,
-                remaining_motion: max_distance - distance,
-                plane,
-                hit,
-            },
-        ) {
+        let impact = MovementImpact {
+            start,
+            end: origin + state.offset,
+            direction,
+            incoming_motion: distance,
+            remaining_motion: max_distance - distance,
+            surface,
+            hit,
+        };
+
+        if !on_hit(&mut state, impact) {
             continue;
         }
 
-        state.velocity = collision_state.project_velocity(
-            plane,
+        if surface.is_walkable {
+            state.ground = Some(GroundSurface::new(hit.entity, hit.normal1));
+        }
+
+        state.velocity = collision_state.update(
+            surface,
             state.velocity,
             mem::replace(&mut previous_velocity, state.velocity),
-            ground_normal,
-            |vel| project_velocity(vel, plane),
+            current_ground_normal.is_some(),
+            |vel| project_velocity(vel, surface),
         );
     }
 
