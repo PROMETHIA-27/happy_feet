@@ -34,10 +34,9 @@ impl CharacterGrounding {
 
     pub fn stable_surface(&self) -> Option<GroundSurface> {
         if self.should_detach {
-            None
-        } else {
-            self.inner_surface
+            return None;
         }
+        self.inner_surface
     }
 
     pub fn clear_surface(&mut self) {
@@ -59,6 +58,10 @@ impl CharacterGrounding {
 
     pub fn normal(&self) -> Option<Dir3> {
         self.stable_surface().map(|ground| ground.normal)
+    }
+
+    pub fn entity(&self) -> Option<Entity> {
+        self.stable_surface().map(|ground| ground.entity)
     }
 }
 

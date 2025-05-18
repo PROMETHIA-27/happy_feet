@@ -9,8 +9,8 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterMovement, GroundingSettings, KinematicCharacterPlugin, MoveInput,
-    OnGroundEnter, OnGroundLeave, SteppingBehaviour, SteppingSettings,
+    Character, CharacterMovement, GroundingSettings, InheritedVelocity, KinematicCharacterPlugin,
+    MoveInput, OnGroundEnter, OnGroundLeave, SteppingBehaviour, SteppingSettings,
     debug::{DebugInput, DebugMode, DebugMotion},
 };
 
@@ -40,6 +40,7 @@ fn main() -> AppExit {
         .add_observer(on_toggle_debug_mode)
         .add_observer(on_toggle_fly_mode)
         .add_systems(Startup, setup)
+        .add_systems(Update, bleh)
         .add_systems(
             PreUpdate,
             (move_input, look_input).after(EnhancedInputSystem),
@@ -99,6 +100,47 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
+    let platform_size = Vec3::new(10.0, 0.4, 2.0);
+    let platform_position = Vec3::new(10.0, 1.0, 10.0);
+    // let platform_offset = Vec3::new(4.0, 0.0, 0.0);
+    let platform_offset = Vec3::new(0.0, 0.0, 0.0);
+    let cylinder_height = 2.0;
+
+    let platform_shape = Cuboid::from_size(platform_size);
+    let cylinder_shape = Cylinder::new(0.5, cylinder_height);
+
+    commands.spawn((
+        RigidBody::Kinematic,
+        AngularVelocity(Vec3::new(0.0, 1.0, 0.0)),
+        Transform::from_translation(platform_position),
+        CenterOfMass(platform_offset),
+        Collider::from(platform_shape),
+        Mesh3d(meshes.add(platform_shape)),
+        MeshMaterial3d(materials.add(StandardMaterial::default())),
+    ));
+    commands.spawn((
+        RigidBody::Static,
+        Transform::from_translation(
+            platform_position + platform_offset
+                - Vec3::Y * (cylinder_height / 2.0 + platform_size.y / 2.0),
+        ),
+        Collider::from(cylinder_shape),
+        Mesh3d(meshes.add(cylinder_shape)),
+        MeshMaterial3d(materials.add(StandardMaterial::default())),
+    ));
+
+    let cube = Cuboid::new(4.0, 1.0, 4.0);
+    commands.spawn((
+        RigidBody::Dynamic,
+        Transform::from_xyz(0.0, 2.0, 0.0),
+        Collider::from(cube),
+        Mesh3d(meshes.add(cube)),
+        MeshMaterial3d(materials.add(StandardMaterial::default())),
+        ExternalAngularImpulse::new(Vec3::new(0.0, 10.0, 0.0)).with_persistence(true),
+        ExternalForce::new(Vec3::Z * 20.0),
+        AngularDamping(10.0),
+    ));
+
     // let shape = Capsule3d::new(0.4, 1.0);
     // let shape = Cuboid::from_length(0.4);
     // let shape = Cone::new(0.4, 1.4);
@@ -107,25 +149,27 @@ fn setup(
 
     commands.spawn((
         Name::new("Player"),
-        MovementMode::Walking,
         CollisionEventsEnabled,
+        MovementMode::Walking,
+        (
+            DebugMotion::default(),
+            DebugInput,
+            Character {
+                skin_width: 0.1,
+                ..Default::default()
+            },
+            SteppingSettings {
+                max_height: 0.4,
+                behaviour: SteppingBehaviour::Always,
+                ..Default::default()
+            },
+            GroundingSettings {
+                max_angle: PI / 4.0 + 0.1,
+                max_distance: 0.2,
+                ..Default::default()
+            },
+        ),
         // Sensor,
-        DebugMotion::default(),
-        DebugInput,
-        Character {
-            skin_width: 0.1,
-            ..Default::default()
-        },
-        SteppingSettings {
-            max_height: 0.4,
-            behaviour: SteppingBehaviour::Always,
-            ..Default::default()
-        },
-        GroundingSettings {
-            max_angle: PI / 4.0 + 0.1,
-            max_distance: 0.2,
-            ..Default::default()
-        },
         walking_actions(),
         Mass(10.0),
         Collider::from(shape),
@@ -136,7 +180,8 @@ fn setup(
             ..Default::default()
         })),
         Transform {
-            translation: Vec3::new(0.0, 10.0, 0.0),
+            // translation: Vec3::new(0.0, 10.0, 0.0),
+            translation: platform_position + platform_offset + Vec3::Y * 10.0,
             rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },
@@ -300,7 +345,7 @@ fn on_jump(
 fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
     for (mut character, mode) in &mut query {
         if let MovementMode::Flying = mode {
-            // character.ground = None;
+            character.grounding.detach_from_surface();
         }
     }
 }
@@ -363,6 +408,17 @@ fn update_camera_offset(
     }
 
     Ok(())
+}
+
+fn bleh(mut query: Query<(&mut InheritedVelocity, &Transform)>) {
+    // for (mut platform_velocity, transform) in &mut query {
+    //     *platform_velocity = PlatformVelocity::calculate(
+    //         &GlobalTransform::default(),
+    //         Vec3::ZERO,
+    //         Vec3::new(0.0, 1.0, 0.0),
+    //         transform.translation,
+    //     );
+    // }
 }
 
 fn update_attachments(

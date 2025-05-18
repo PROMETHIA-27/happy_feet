@@ -1,6 +1,6 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, mem};
 
-use avian3d::prelude::*;
+use avian3d::{prelude::*, sync::PreviousGlobalTransform};
 use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{CharacterGrounding, GroundSurface, ground_check, is_walkable};
@@ -29,7 +29,9 @@ impl Plugin for KinematicCharacterPlugin {
             FixedPostUpdate,
             (
                 physics_interactions.before(PhysicsSet::Prepare),
-                move_character.after(PhysicsSet::Sync),
+                (update_character_platform_velocity, move_character)
+                    .after(PhysicsSet::Sync)
+                    .chain(),
             ),
         );
 
@@ -37,6 +39,8 @@ impl Plugin for KinematicCharacterPlugin {
             PhysicsSchedule,
             depenetrate_character.in_set(NarrowPhaseSet::Last),
         );
+
+        app.add_observer(inherit_platform_velocity);
     }
 }
 
@@ -64,7 +68,7 @@ pub(crate) fn character_forces(
     for (mut character, movement) in &mut query {
         character.velocity *= drag_factor(movement.drag, time.delta_secs());
 
-        match character.grounded() {
+        match character.is_grounded() {
             true => {
                 let f = friction_factor(character.velocity, movement.friction, time.delta_secs());
                 character.velocity *= f;
@@ -85,14 +89,13 @@ pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
 pub(crate) fn movement_input(
     mut query: Query<(
         &MoveInput,
-        &mut MoveAcceleration,
         &mut Character,
         &CharacterMovement,
         Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
-    for (move_input, mut move_acceleration, mut character, movement, debug_mode) in &mut query {
+    for (move_input, mut character, movement, debug_mode) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
@@ -102,22 +105,26 @@ pub(crate) fn movement_input(
             continue;
         }
 
-        let max_acceleration = match character.grounded() {
+        let max_acceleration = match character.is_grounded() {
             true => movement.ground_acceleratin,
             false => movement.air_acceleratin,
         };
 
-        let mut move_accel = acceleration(
-            character.velocity,
-            *direction,
+        let (direction, velocity) = match character.grounding.normal() {
+            Some(normal) => (
+                align_with_surface(*direction, *normal, *character.up),
+                align_with_surface(character.velocity, *normal, *character.up),
+            ),
+            None => (*direction, character.velocity),
+        };
+
+        let move_accel = acceleration(
+            velocity,
+            direction,
             max_acceleration * throttle,
             movement.target_speed * throttle,
             time.delta_secs(),
         );
-
-        if let Some(ground) = character.grounding.stable_surface() {
-            move_accel = align_with_surface(move_accel, *ground.normal, *character.up);
-        }
 
         character.velocity += move_accel;
     }
@@ -265,6 +272,11 @@ fn physics_interactions(
             continue;
         };
 
+        // Don't push the body the character is standing on
+        if character.grounding.entity() == Some(hit.entity) {
+            continue;
+        }
+
         let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) else {
             continue;
         };
@@ -295,12 +307,101 @@ pub struct OnGroundEnter(pub GroundSurface);
 #[derive(Event, Deref)]
 pub struct OnGroundLeave(pub GroundSurface);
 
+pub(crate) fn update_character_platform_velocity(
+    mut characters: Query<(&Character, &mut InheritedVelocity, &Transform)>,
+    platforms: Query<(
+        &LinearVelocity,
+        &AngularVelocity,
+        &GlobalTransform,
+        &ComputedCenterOfMass,
+        &ComputedMass,
+        &PreviousGlobalTransform,
+    )>,
+    time: Res<Time>,
+) -> Result {
+    for (character, mut velocity_on_platform, transform) in &mut characters {
+        let Some(platform) = character.grounding.inner_surface else {
+            *velocity_on_platform = InheritedVelocity::default();
+            continue;
+        };
+
+        let (
+            platform_linear_velocity,
+            platform_angular_velocity,
+            platform_transform,
+            platform_center_of_mass,
+            platform_mass,
+            previous_platform_transform,
+        ) = platforms.get(platform.entity)?;
+
+        let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
+        // let platform_rotation = platform_transform.rotation();
+
+        // // let Some((
+        // //     previous_platform_entity,
+        // //     previous_platform_position,
+        // //     previous_platform_rotation,
+        // // )) = velocity_on_platform.previous_state
+        // // else {
+        // //     velocity_on_platform.previous_state =
+        // //         Some((platform.entity, platform_position, platform_rotation));
+        // //     continue;
+        // // };
+
+        // // if previous_platform_entity != platform.entity {
+        // //     velocity_on_platform.previous_state =
+        // //         Some((platform.entity, platform_position, platform_rotation));
+        // //     continue;
+        // // }
+
+        // // let delta_position = platform_position - previous_platform_position;
+
+        // // let delta_rotation =
+        // //     platform_rotation.to_scaled_axis() - previous_platform_rotation.to_scaled_axis();
+
+        // // dbg!([platform_position, previous_platform_position]);
+
+        // // *velocity_on_platform = InheritedVelocity::at_point(
+        // //     platform_position,
+        // //     delta_position / time.delta_secs(),
+        // //     delta_rotation / time.delta_secs(),
+        // //     transform.translation,
+        // //     character.velocity,
+        // //     time.delta_secs(),
+        // // );
+
+        // // velocity_on_platform.previous_state =
+        // //     Some((platform.entity, platform_position, platform_rotation));
+
+        *velocity_on_platform = InheritedVelocity::at_point(
+            platform_position,
+            platform_linear_velocity.0,
+            platform_angular_velocity.0,
+            transform.translation,
+            character.velocity,
+            time.delta_secs(),
+        );
+    }
+
+    Ok(())
+}
+
+pub(crate) fn inherit_platform_velocity(
+    trigger: Trigger<OnGroundLeave>,
+    mut query: Query<(&mut Character, &mut InheritedVelocity)>,
+) -> Result {
+    let (mut character, mut platform_velocity) = query.get_mut(trigger.target())?;
+    character.velocity += mem::take(&mut platform_velocity.velocity);
+    Ok(())
+}
+
 pub(crate) fn move_character(
     mut commands: Commands,
     spatial_query: SpatialQuery,
     mut query: Query<(
         Entity,
         &mut Character,
+        &mut InheritedVelocity,
         &GroundingSettings,
         &SteppingSettings,
         &mut Transform,
@@ -319,6 +420,7 @@ pub(crate) fn move_character(
     for (
         entity,
         mut character,
+        mut platform_velocity,
         grounding_settings,
         stepping_settings,
         mut transform,
@@ -330,6 +432,8 @@ pub(crate) fn move_character(
         debug_mode,
     ) in &mut query
     {
+        transform.translation += platform_velocity.velocity * time.delta_secs();
+
         if is_sensor {
             transform.translation += character.velocity * time.delta_secs();
             continue;
@@ -371,7 +475,7 @@ pub(crate) fn move_character(
 
         // When already grounded, add a small epsilon to make sure we don't randomly
         // loose grip when the ground angle matches the max angle perfectly
-        let walkable_angle = match character.grounded() {
+        let walkable_angle = match character.is_grounded() {
             true => grounding_settings.max_angle + 0.01,
             false => grounding_settings.max_angle,
         };
@@ -405,8 +509,12 @@ pub(crate) fn move_character(
              }| {
                 let try_step = match stepping_settings.behaviour {
                     SteppingBehaviour::Never => false,
-                    SteppingBehaviour::Grounded => !surface.is_walkable && character.grounded(),
+                    SteppingBehaviour::Grounded => !surface.is_walkable && character.is_grounded(),
                     SteppingBehaviour::Always => !surface.is_walkable,
+                    SteppingBehaviour::GroundedOrFalling => {
+                        !surface.is_walkable
+                            && (character.is_grounded() || state.velocity.dot(*character.up) < 0.0)
+                    }
                 };
 
                 if try_step {
@@ -444,14 +552,14 @@ pub(crate) fn move_character(
                 // For now, assume the collision is ended instantly which is probably the case with move and slide anyways
                 collision_ended_events.write(CollisionEnded(entity, hit.entity));
 
-                if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
-                    if other_body.is_dynamic() {
-                        other_vel.0 += direction.project_onto(hit.normal1)
-                            * remaining_motion
-                            * other_mass.inverse()
-                            * character_mass.value();
-                    }
-                }
+                // if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
+                //     if other_body.is_dynamic() {
+                //         other_vel.0 += direction.project_onto(hit.normal1)
+                //             * remaining_motion
+                //             * other_mass.inverse()
+                //             * character_mass.value();
+                //     }
+                // }
 
                 if debug_mode {
                     if let Some(lines) = debug_motion.as_mut() {
@@ -477,12 +585,7 @@ pub(crate) fn move_character(
 
         let mut new_translation = transform.translation + movement.offset;
 
-        // This causes the character to not become grounded when landing on ramps and velocity is pointing up
-        // if !character.grounded() && character.velocity.dot(*character.up) > 1e-4 {
-        //     movement.ground = None;
-        // }
-
-        if character.grounded() || movement.ground.is_some() {
+        if character.is_grounded() || movement.ground.is_some() {
             if let Some((ground_distance, ground)) = ground_check(
                 collider,
                 new_translation,
@@ -559,7 +662,6 @@ pub(crate) fn move_character(
         if !debug_mode {
             transform.translation = new_translation;
             character.velocity = movement.velocity;
-
             character.grounding = CharacterGrounding::new(movement.ground);
         }
     }
@@ -567,12 +669,67 @@ pub(crate) fn move_character(
     Ok(())
 }
 
-pub(crate) struct PlatformVelocity {
-    pub current: Vec3,
-    pub previous: Vec3,
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+pub struct InheritedVelocity {
+    pub velocity: Vec3,
+    pub previous_state: Option<(Entity, Vec3, Quat)>,
 }
 
-pub(crate) struct CharacterVelocity(pub Vec3);
+impl InheritedVelocity {
+    pub fn at_point(
+        translation: Vec3,
+        linear_velocity: Vec3,
+        angular_velocity: Vec3,
+        point: Vec3,
+        current_velocity: Vec3,
+        delta: f32,
+    ) -> Self {
+        // Calculate an initial estimate of platform velocity at current position
+        let initial_velocity =
+            inherited_velocity_at_point(translation, linear_velocity, angular_velocity, point);
+
+        // Calculate midpoint position (where we'll be halfway through the timestep)
+        let midpoint_position = point + (current_velocity + initial_velocity) * delta / 2.0;
+
+        // Calculate the final platform velocity
+        let velocity = inherited_velocity_at_point(
+            translation,
+            linear_velocity,
+            angular_velocity,
+            midpoint_position,
+        );
+
+        dbg!(velocity.length());
+
+        Self {
+            velocity,
+            previous_state: None,
+        }
+    }
+}
+
+pub(crate) fn inherited_velocity_at_point(
+    translation: Vec3,
+    linear_velocity: Vec3,
+    angular_velocity: Vec3,
+    point: Vec3,
+) -> Vec3 {
+    let mut inherited_velocity = linear_velocity;
+
+    // Angular velocity component
+    if angular_velocity.length_squared() > 0.0 {
+        // Vector from platform center to character
+        let radius_vector = point - translation;
+
+        // Tangential velocity = angular_velocity × radius_vector
+        inherited_velocity += angular_velocity.cross(radius_vector);
+    };
+
+    inherited_velocity
+}
+
+pub(crate) struct RelativeVelocity(pub Vec3);
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component)]
@@ -601,6 +758,7 @@ impl Default for GroundingSettings {
 pub enum SteppingBehaviour {
     Never,
     Grounded,
+    GroundedOrFalling,
     Always,
 }
 
@@ -629,9 +787,9 @@ impl Default for SteppingSettings {
     CharacterFilter,
     CharacterMovement,
     MoveInput,
-    MoveAcceleration,
     GroundingSettings,
     SteppingSettings,
+    InheritedVelocity,
 )]
 pub struct Character {
     pub velocity: Vec3,
@@ -692,7 +850,7 @@ impl Character {
     }
 
     /// Returns `true` if the character is standing on the ground.
-    pub fn grounded(&self) -> bool {
+    pub fn is_grounded(&self) -> bool {
         self.grounding.is_stable()
     }
 
@@ -700,17 +858,6 @@ impl Character {
         let aabb = shape.aabb(Vec3::ZERO, rotation);
         let down = aabb.min.dot(*self.up) - self.skin_width;
         self.up * down
-    }
-}
-
-/// The next movement acceleration of the character
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
-#[reflect(Component)]
-pub struct MoveAcceleration(pub Vec3);
-
-impl MoveAcceleration {
-    pub fn take(&mut self) -> Vec3 {
-        std::mem::take(&mut self.0)
     }
 }
 
@@ -756,7 +903,7 @@ pub struct MoveInput {
 
 impl MoveInput {
     pub fn update(&mut self) -> Vec3 {
-        self.previous = std::mem::take(&mut self.value);
+        self.previous = mem::take(&mut self.value);
         self.previous
     }
 
