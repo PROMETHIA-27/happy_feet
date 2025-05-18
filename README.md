@@ -2,7 +2,7 @@
 
 ## TODO
 
-- [ ] stair stepping
+- [x] stair stepping
 - [ ] moving platforms
-- [ ] seperate movement / physics velocity
+- [ ] ~~seperate movement / physics velocity~~
 
