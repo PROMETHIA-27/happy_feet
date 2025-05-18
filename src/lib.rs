@@ -335,6 +335,7 @@ pub(crate) fn update_character_platform_velocity(
         ) = platforms.get(platform.entity)?;
 
         let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
+
         // let platform_rotation = platform_transform.rotation();
 
         // // let Some((
@@ -699,8 +700,6 @@ impl InheritedVelocity {
             angular_velocity,
             midpoint_position,
         );
-
-        dbg!(velocity.length());
 
         Self {
             velocity,

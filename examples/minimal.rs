@@ -102,8 +102,7 @@ fn setup(
 ) {
     let platform_size = Vec3::new(10.0, 0.4, 2.0);
     let platform_position = Vec3::new(10.0, 1.0, 10.0);
-    // let platform_offset = Vec3::new(4.0, 0.0, 0.0);
-    let platform_offset = Vec3::new(0.0, 0.0, 0.0);
+    let platform_offset = Vec3::new(4.0, 0.0, 0.0);
     let cylinder_height = 2.0;
 
     let platform_shape = Cuboid::from_size(platform_size);
