@@ -3,83 +3,79 @@ use std::fmt::Debug;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::sweep;
+use crate::{Surface, sweep};
 
 /// The ground state of a character.
 #[derive(Reflect, Default, Debug, PartialEq, Clone, Copy)]
 pub struct CharacterGrounding {
-    pub(crate) inner_surface: Option<GroundSurface>,
+    pub(crate) inner_ground: Option<Ground>,
     /// If the character should be forced to unground, e.g., after jumping.
     should_detach: bool,
 }
 
 impl CharacterGrounding {
-    pub fn new(surface: Option<GroundSurface>) -> Self {
+    pub fn new(surface: Option<Ground>) -> Self {
         Self {
-            inner_surface: surface,
+            inner_ground: surface,
             ..Default::default()
         }
     }
 
-    pub fn from_surface(surface: GroundSurface) -> Self {
-        Self {
-            inner_surface: Some(surface),
-            ..Default::default()
-        }
+    pub fn is_grounded(&self) -> bool {
+        !self.should_detach && self.inner_ground.is_some()
     }
 
-    pub fn is_stable(&self) -> bool {
-        !self.should_detach && self.inner_surface.is_some()
-    }
-
-    pub fn stable_surface(&self) -> Option<GroundSurface> {
+    pub fn ground(&self) -> Option<Ground> {
         if self.should_detach {
             return None;
         }
-        self.inner_surface
+        self.inner_ground
     }
 
-    pub fn clear_surface(&mut self) {
+    pub fn clear_ground(&mut self) {
         *self = Self::default();
     }
 
-    pub fn set_surface(&mut self, ground: GroundSurface) {
-        *self = Self::from_surface(ground);
+    pub fn set_ground(&mut self, ground: Ground) {
+        *self = Self::from(ground);
     }
 
-    pub fn detach_from_surface(&mut self) -> Option<GroundSurface> {
-        if !self.is_stable() {
+    pub fn detach(&mut self) -> Option<Ground> {
+        if !self.is_grounded() {
             return None;
         }
 
         self.should_detach = true;
-        self.inner_surface
+        self.inner_ground
     }
 
     pub fn normal(&self) -> Option<Dir3> {
-        self.stable_surface().map(|ground| ground.normal)
+        self.ground().map(|ground| ground.normal)
     }
 
     pub fn entity(&self) -> Option<Entity> {
-        self.stable_surface().map(|ground| ground.entity)
+        self.ground().map(|ground| ground.entity)
     }
 }
 
-impl From<GroundSurface> for CharacterGrounding {
-    fn from(value: GroundSurface) -> Self {
-        Self::from_surface(value)
+impl From<Ground> for CharacterGrounding {
+    fn from(value: Ground) -> Self {
+        Self {
+            inner_ground: Some(value),
+            ..Default::default()
+        }
     }
 }
 
 /// Represents a surface that a character can stand on.
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
-pub struct GroundSurface {
+pub struct Ground {
     /// The surface normal vector, pointing outward from the surface.
     pub normal: Dir3,
     pub entity: Entity,
 }
 
-impl GroundSurface {
+impl Ground {
     pub fn new<D>(entity: Entity, normal: D) -> Self
     where
         D: TryInto<Dir3>,
@@ -119,7 +115,7 @@ pub(crate) fn ground_check(
     walkable_angle: f32,
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
-) -> Option<(f32, GroundSurface)> {
+) -> Option<(f32, Ground)> {
     let (distance, hit) = sweep(
         collider,
         translation,
@@ -132,7 +128,7 @@ pub(crate) fn ground_check(
         true,
     )?;
 
-    let ground = GroundSurface::new_if_walkable(hit.entity, hit.normal1, up, walkable_angle)?;
+    let ground = Ground::new_if_walkable(hit.entity, hit.normal1, up, walkable_angle)?;
 
     Some((distance, ground))
 }

@@ -3,7 +3,7 @@ use std::{f32::consts::PI, mem};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{CollisionState, ground::GroundSurface, is_walkable, projection::Surface};
+use crate::{CollisionState, ground::Ground, is_walkable, projection::Surface};
 
 /// Result of the move_and_slide function.
 
@@ -157,7 +157,7 @@ pub(crate) struct MovementState {
     pub velocity: Vec3,
     pub offset: Vec3,
     pub remaining_time: f32,
-    pub ground: Option<GroundSurface>,
+    pub ground: Option<Ground>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,13 +167,10 @@ pub(crate) struct MovementImpact {
     pub direction: Dir3,
     pub incoming_motion: f32,
     pub remaining_motion: f32,
-    pub surface: Surface,
     pub hit: ShapeHitData,
 }
 
 pub(crate) struct MovementConfig {
-    pub walkable_angle: f32,
-    pub up_direction: Dir3,
     pub max_slide_count: u8,
     pub skin_width: f32,
 }
@@ -181,8 +178,6 @@ pub(crate) struct MovementConfig {
 impl Default for MovementConfig {
     fn default() -> Self {
         Self {
-            walkable_angle: PI / 4.0,
-            up_direction: Dir3::Y,
             max_slide_count: 4,
             skin_width: 0.1,
         }
@@ -201,7 +196,7 @@ pub(crate) fn collide_and_slide(
     spatial_query: &SpatialQuery,
     delta: f32,
     mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
-    mut on_hit: impl FnMut(&mut MovementState, MovementImpact) -> bool,
+    mut on_hit: impl FnMut(&mut MovementState, MovementImpact) -> Option<Surface>,
 ) -> MovementState {
     let mut state = MovementState {
         velocity,
@@ -235,14 +230,11 @@ pub(crate) fn collide_and_slide(
             true,
         ) else {
             state.offset += direction * max_distance;
-
             break;
         };
 
         state.remaining_time *= 1.0 - distance / max_distance;
         state.offset += direction * distance;
-
-        let surface = Surface::new(hit.normal1, config.walkable_angle, config.up_direction);
 
         let impact = MovementImpact {
             start,
@@ -250,16 +242,15 @@ pub(crate) fn collide_and_slide(
             direction,
             incoming_motion: distance,
             remaining_motion: max_distance - distance,
-            surface,
             hit,
         };
 
-        if !on_hit(&mut state, impact) {
+        let Some(surface) = on_hit(&mut state, impact) else {
             continue;
-        }
+        };
 
         if surface.is_walkable {
-            state.ground = Some(GroundSurface::new(hit.entity, hit.normal1));
+            state.ground = Some(Ground::new(hit.entity, hit.normal1));
         }
 
         state.velocity = collision_state.update(

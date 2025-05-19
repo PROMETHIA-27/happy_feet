@@ -31,8 +31,8 @@ fn main() -> AppExit {
         })
         .init_gizmo_group::<PhysicsGizmos>()
         .add_input_context::<Walking>()
-        .add_observer(on_collision_events_start)
-        .add_observer(on_collision_events_end)
+        // .add_observer(on_collision_events_start)
+        // .add_observer(on_collision_events_end)
         .add_observer(on_ground_enter)
         .add_observer(on_ground_leave)
         .add_observer(on_jump)
@@ -344,7 +344,7 @@ fn on_jump(
 fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
     for (mut character, mode) in &mut query {
         if let MovementMode::Flying = mode {
-            character.grounding.detach_from_surface();
+            character.grounding.detach();
         }
     }
 }

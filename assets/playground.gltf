@@ -73,7 +73,8 @@
 				40,
 				41,
 				42,
-				43
+				43,
+				44
 			]
 		}
 	],
@@ -604,7 +605,7 @@
 			],
 			"translation":[
 				-1,
-				9,
+				1.0000004768371582,
 				23
 			]
 		},
@@ -704,6 +705,18 @@
 				7,
 				9,
 				7
+			]
+		},
+		{
+			"extras":{
+				"skein":[]
+			},
+			"mesh":42,
+			"name":"Cube.038",
+			"translation":[
+				-0.9999712705612183,
+				2.25,
+				23
 			]
 		}
 	],
@@ -1765,6 +1778,30 @@
 						"POSITION":128,
 						"NORMAL":129,
 						"TEXCOORD_0":130
+					},
+					"indices":7,
+					"material":2
+				}
+			]
+		},
+		{
+			"extras":{
+				"skein":[
+					{
+						"avian3d::collision::collider::constructor::ColliderConstructor":"ConvexHullFromMesh"
+					},
+					{
+						"avian3d::dynamics::rigid_body::RigidBody":"Dynamic"
+					}
+				]
+			},
+			"name":"Cube.081",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":131,
+						"NORMAL":132,
+						"TEXCOORD_0":133
 					},
 					"indices":7,
 					"material":2
@@ -3009,6 +3046,34 @@
 			"componentType":5126,
 			"count":24,
 			"type":"VEC2"
+		},
+		{
+			"bufferView":131,
+			"componentType":5126,
+			"count":24,
+			"max":[
+				4,
+				0.04999999701976776,
+				1
+			],
+			"min":[
+				-4,
+				-0.04999999701976776,
+				-1
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":132,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":133,
+			"componentType":5126,
+			"count":24,
+			"type":"VEC2"
 		}
 	],
 	"bufferViews":[
@@ -3797,6 +3862,24 @@
 			"byteLength":192,
 			"byteOffset":116468,
 			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":116660,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":288,
+			"byteOffset":116948,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":192,
+			"byteOffset":117236,
+			"target":34962
 		}
 	],
 	"samplers":[
@@ -3807,7 +3890,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":116660,
+			"byteLength":117428,
 			"uri":"playground.bin"
 		}
 	]
