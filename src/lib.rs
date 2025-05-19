@@ -352,21 +352,6 @@ fn physics_interactions(
     }
 }
 
-fn apply_impulse_on_point(
-    impulse: Vec3,
-    point: Vec3,
-    linear_velocity: &mut Vec3,
-    angular_velocity: &mut Vec3,
-    inverse_mass: f32,
-    inverse_inertia: Mat3,
-    center_of_mass: Vec3,
-) {
-    *linear_velocity += inverse_mass * impulse;
-
-    let torque = (point - center_of_mass).cross(impulse);
-    *angular_velocity += inverse_inertia * torque;
-}
-
 /// Triggered when the character becomes grounded during a movement update.
 ///
 /// This is only triggered for the last ground the character touched during the update and will not be triggered
@@ -387,8 +372,6 @@ pub(crate) fn update_character_platform_velocity(
         &AngularVelocity,
         &GlobalTransform,
         &ComputedCenterOfMass,
-        &ComputedMass,
-        &PreviousGlobalTransform,
     )>,
     time: Res<Time>,
 ) -> Result {
@@ -403,49 +386,9 @@ pub(crate) fn update_character_platform_velocity(
             platform_angular_velocity,
             platform_transform,
             platform_center_of_mass,
-            platform_mass,
-            previous_platform_transform,
         ) = platforms.get(platform.entity)?;
 
         let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
-
-        // let platform_rotation = platform_transform.rotation();
-
-        // // let Some((
-        // //     previous_platform_entity,
-        // //     previous_platform_position,
-        // //     previous_platform_rotation,
-        // // )) = velocity_on_platform.previous_state
-        // // else {
-        // //     velocity_on_platform.previous_state =
-        // //         Some((platform.entity, platform_position, platform_rotation));
-        // //     continue;
-        // // };
-
-        // // if previous_platform_entity != platform.entity {
-        // //     velocity_on_platform.previous_state =
-        // //         Some((platform.entity, platform_position, platform_rotation));
-        // //     continue;
-        // // }
-
-        // // let delta_position = platform_position - previous_platform_position;
-
-        // // let delta_rotation =
-        // //     platform_rotation.to_scaled_axis() - previous_platform_rotation.to_scaled_axis();
-
-        // // dbg!([platform_position, previous_platform_position]);
-
-        // // *velocity_on_platform = InheritedVelocity::at_point(
-        // //     platform_position,
-        // //     delta_position / time.delta_secs(),
-        // //     delta_rotation / time.delta_secs(),
-        // //     transform.translation,
-        // //     character.velocity,
-        // //     time.delta_secs(),
-        // // );
-
-        // // velocity_on_platform.previous_state =
-        // //     Some((platform.entity, platform_position, platform_rotation));
 
         *velocity_on_platform = InheritedVelocity::at_point(
             platform_position,
@@ -465,7 +408,7 @@ pub(crate) fn inherit_platform_velocity(
     mut query: Query<(&mut Character, &mut InheritedVelocity)>,
 ) -> Result {
     let (mut character, mut platform_velocity) = query.get_mut(trigger.target())?;
-    character.velocity += mem::take(&mut platform_velocity.velocity);
+    character.velocity += mem::take(&mut platform_velocity.0);
     Ok(())
 }
 
@@ -506,7 +449,7 @@ pub(crate) fn move_character(
         debug_mode,
     ) in &mut query
     {
-        transform.translation += platform_velocity.velocity * time.delta_secs();
+        transform.translation += platform_velocity.0 * time.delta_secs();
 
         if is_sensor {
             transform.translation += character.velocity * time.delta_secs();
@@ -631,15 +574,6 @@ pub(crate) fn move_character(
                 // For now, assume the collision is ended instantly which is probably the case with move and slide anyways
                 collision_ended_events.write(CollisionEnded(entity, hit.entity));
 
-                // if let Ok((mut other_vel, other_mass, other_body)) = bodies.get_mut(hit.entity) {
-                //     if other_body.is_dynamic() {
-                //         other_vel.0 += direction.project_onto(hit.normal1)
-                //             * remaining_motion
-                //             * other_mass.inverse()
-                //             * character_mass.value();
-                //     }
-                // }
-
                 if debug_mode {
                     if let Some(lines) = debug_motion.as_mut() {
                         let duration = duration - state.remaining_time;
@@ -750,10 +684,7 @@ pub(crate) fn move_character(
 
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
-pub struct InheritedVelocity {
-    pub velocity: Vec3,
-    pub previous_state: Option<(Entity, Vec3, Quat)>,
-}
+pub struct InheritedVelocity(pub Vec3);
 
 impl InheritedVelocity {
     pub fn at_point(
@@ -779,10 +710,7 @@ impl InheritedVelocity {
             midpoint_position,
         );
 
-        Self {
-            velocity,
-            previous_state: None,
-        }
+        Self(velocity)
     }
 }
 
@@ -991,6 +919,21 @@ impl MoveInput {
     pub fn previous(&self) -> Vec3 {
         self.previous
     }
+}
+
+fn apply_impulse_on_point(
+    impulse: Vec3,
+    point: Vec3,
+    linear_velocity: &mut Vec3,
+    angular_velocity: &mut Vec3,
+    inverse_mass: f32,
+    inverse_inertia: Mat3,
+    center_of_mass: Vec3,
+) {
+    *linear_velocity += inverse_mass * impulse;
+
+    let torque = (point - center_of_mass).cross(impulse);
+    *angular_velocity += inverse_inertia * torque;
 }
 
 #[must_use]
