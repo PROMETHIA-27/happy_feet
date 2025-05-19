@@ -1,9 +1,7 @@
-# 🐧🐾🐧🐾🐧🐾🐧
-
 Work in progress kinematic character controller for the bevy game engine 
 
 > [!CAUTION]
-> Here be penguins
+> Here be penguins 🐧🐧🐧🐧🐧🐧🐧🐧🐧🐧🐧🐧
 
 ---
 
