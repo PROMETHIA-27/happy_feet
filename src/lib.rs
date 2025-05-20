@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, mem};
 
-use avian3d::{prelude::*, sync::PreviousGlobalTransform};
+use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{CharacterGrounding, Ground, ground_check, is_walkable};
@@ -28,8 +28,16 @@ impl Plugin for KinematicCharacterPlugin {
         app.add_systems(
             FixedPostUpdate,
             (
-                physics_interactions.before(PhysicsSet::Prepare),
-                (update_character_platform_velocity, move_character)
+                (
+                    make_character_dynamic, //
+                    physics_interactions,
+                )
+                    .before(PhysicsSet::Prepare),
+                (
+                    make_character_kinematic,
+                    update_character_platform_velocity,
+                    move_character,
+                )
                     .after(PhysicsSet::Sync)
                     .chain(),
             ),
@@ -62,7 +70,7 @@ pub(crate) fn update_character_filter(
 }
 
 pub(crate) fn character_forces(
-    mut query: Query<(&mut Character, &CharacterMovement)>,
+    mut query: Query<(&mut Character, &CharacterForces)>,
     time: Res<Time>,
 ) {
     for (mut character, movement) in &mut query {
@@ -105,10 +113,10 @@ pub(crate) fn movement_input(
             continue;
         }
 
-        let max_acceleration = match character.is_grounded() {
-            true => movement.ground_acceleratin,
-            false => movement.air_acceleratin,
-        };
+        // let max_acceleration = match character.is_grounded() {
+        //     true => movement.ground_acceleratin,
+        //     false => movement.air_acceleratin,
+        // };
 
         let (direction, velocity) = match character.grounding.normal() {
             Some(normal) => (
@@ -121,7 +129,7 @@ pub(crate) fn movement_input(
         let move_accel = acceleration(
             velocity,
             direction,
-            max_acceleration * throttle,
+            movement.max_acceleration * throttle,
             movement.target_speed * throttle,
             time.delta_secs(),
         );
@@ -236,10 +244,31 @@ pub(crate) fn depenetrate_character(
     }
 }
 
+fn make_character_dynamic(
+    mut query: Query<(&mut RigidBody, &mut LockedAxes, &mut GravityScale), With<Character>>,
+) {
+    for (mut rigidbody, mut locked_axes, mut gravity_scale) in &mut query {
+        *rigidbody = RigidBody::Dynamic;
+        gravity_scale.0 = 0.0;
+        *locked_axes = LockedAxes::ROTATION_LOCKED;
+    }
+}
+
+fn make_character_kinematic(
+    mut query: Query<(&mut RigidBody, &mut LinearVelocity), With<Character>>,
+) {
+    for (mut rigidbody, mut linear_velocity) in &mut query {
+        *rigidbody = RigidBody::Kinematic;
+        linear_velocity.0 = Vec3::ZERO;
+    }
+}
+
 fn physics_interactions(
     spatial_query: SpatialQuery,
+    mut commands: Commands,
     characters: Query<
         (
+            Entity,
             &Character,
             &Transform,
             &Collider,
@@ -260,7 +289,14 @@ fn physics_interactions(
     )>,
     time: Res<Time>,
 ) {
-    for (character, character_transform, character_collider, character_mass, filter) in &characters
+    for (
+        character_entity,
+        character,
+        character_transform,
+        character_collider,
+        character_mass,
+        filter,
+    ) in &characters
     {
         let Ok((sweep_direction, target_sweep_distance)) =
             Dir3::new_and_length(character.velocity * time.delta_secs())
@@ -429,7 +465,7 @@ pub(crate) fn move_character(
         Option<&mut DebugMotion>,
         Has<DebugMode>,
     )>,
-    mut bodies: Query<(&mut LinearVelocity, &ComputedMass, &RigidBody)>,
+    mut bodies: Query<&RigidBody>,
     mut collision_started_events: EventWriter<CollisionStarted>,
     mut collision_ended_events: EventWriter<CollisionEnded>,
     time: Res<Time>,
@@ -533,7 +569,7 @@ pub(crate) fn move_character(
                 };
 
                 let is_dynamic = match bodies.get_mut(hit.entity) {
-                    Ok((_, _, rb)) => rb.is_dynamic(),
+                    Ok(rb) => rb.is_dynamic(),
                     Err(_) => false,
                 };
 
@@ -790,7 +826,8 @@ impl Default for SteppingSettings {
     RigidBody = RigidBody::Kinematic,
     Collider = Capsule3d::new(0.4, 1.0),
     CharacterFilter,
-    CharacterMovement,
+    CharacterMovement = CharacterMovement::DEFAULT_GROUND,
+    CharacterForces = CharacterForces::DEFAULT_GROUND,
     MoveInput,
     GroundingSettings,
     SteppingSettings,
@@ -866,31 +903,72 @@ impl Character {
     }
 }
 
-#[derive(Component, Reflect, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 pub struct CharacterMovement {
     pub target_speed: f32,
-    pub ground_acceleratin: f32,
-    pub air_acceleratin: f32,
+    pub max_acceleration: f32,
+}
+
+impl CharacterMovement {
+    pub const DEFAULT_GROUND: Self = Self {
+        target_speed: 8.0,
+        max_acceleration: 100.0,
+    };
+
+    pub const DEFAULT_AIR: Self = Self {
+        target_speed: 8.0,
+        max_acceleration: 20.0,
+    };
+}
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+pub struct CharacterForces {
     pub gravity: Vec3,
     pub friction: f32,
     pub drag: f32,
-    pub jump_impulse: f32,
 }
 
-impl Default for CharacterMovement {
-    fn default() -> Self {
-        Self {
-            target_speed: 8.0,
-            ground_acceleratin: 100.0,
-            friction: 60.0,
-            drag: 0.01,
-            jump_impulse: 7.0,
-            air_acceleratin: 20.0,
-            gravity: Vec3::Y * -20.0,
-        }
-    }
+impl CharacterForces {
+    pub const DEFAULT_GROUND: Self = Self {
+        gravity: Vec3::ZERO,
+        friction: 60.0,
+        drag: 0.01,
+    };
+
+    pub const DEFAULT_AIR: Self = Self {
+        gravity: Vec3::new(0.0, -20.0, 0.0),
+        friction: 0.0,
+        drag: 0.01,
+    };
 }
+
+// #[derive(Component, Reflect, Debug, Clone, Copy)]
+// #[reflect(Component)]
+// pub struct CharacterMovement {
+//     pub target_speed: f32,
+//     pub ground_acceleratin: f32,
+//     pub air_acceleratin: f32,
+//     pub gravity: Vec3,
+//     pub friction: f32,
+//     pub drag: f32,
+//     pub jump_impulse: f32,
+// }
+
+// impl Default for CharacterMovement {
+//     fn default() -> Self {
+//         Self {
+//             target_speed: 8.0,
+//             ground_acceleratin: 100.0,
+//             friction: 60.0,
+//             drag: 0.01,
+//             jump_impulse: 7.0,
+//             air_acceleratin: 20.0,
+//             gravity: Vec3::Y * -20.0,
+//         }
+//     }
+// }
 
 /// Cache the [`SpatialQueryFilter`] of the character to avoid re-allocating the excluded entities map every time it's used.
 ///

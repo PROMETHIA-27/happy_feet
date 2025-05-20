@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
 
-use crate::{Character, CharacterMovement, GroundingSettings, MoveInput, move_character};
+use crate::{Character, GroundingSettings, MoveInput, CharacterMovement, move_character};
 
 pub(crate) fn plugin(app: &mut App) {
     app.insert_gizmo_config(
@@ -140,7 +140,6 @@ fn draw_motion(
     mut gizmos: Gizmos<CharacterGizmos>,
     mut query: Query<(
         &Character,
-        &GroundingSettings,
         &CharacterMovement,
         &Collider,
         &Transform,
@@ -148,16 +147,7 @@ fn draw_motion(
         Has<DebugMode>,
     )>,
 ) {
-    for (
-        character,
-        grounding_settings,
-        movement,
-        collider,
-        transform,
-        mut debug_motion,
-        debug_mode,
-    ) in &mut query
-    {
+    for (character, movement, collider, transform, mut debug_motion, debug_mode) in &mut query {
         let line_color = |t: f32, velocity: Vec3| {
             let target_speed_sq = movement.target_speed * movement.target_speed;
 

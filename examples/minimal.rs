@@ -9,8 +9,9 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterMovement, GroundingSettings, InheritedVelocity, KinematicCharacterPlugin,
-    MoveInput, OnGroundEnter, OnGroundLeave, SteppingBehaviour, SteppingSettings,
+    Character, CharacterForces, CharacterMovement, GroundingSettings, InheritedVelocity,
+    KinematicCharacterPlugin, MoveInput, OnGroundEnter, OnGroundLeave, SteppingBehaviour,
+    SteppingSettings,
     debug::{DebugInput, DebugMode, DebugMotion},
 };
 
@@ -40,7 +41,7 @@ fn main() -> AppExit {
         .add_observer(on_toggle_debug_mode)
         .add_observer(on_toggle_fly_mode)
         .add_systems(Startup, setup)
-        .add_systems(Update, bleh)
+        .add_systems(PreUpdate, update_movement_settings)
         .add_systems(
             PreUpdate,
             (move_input, look_input).after(EnhancedInputSystem),
@@ -92,6 +93,28 @@ struct AttachmentPosition(Vec3);
 enum MovementMode {
     Walking,
     Flying,
+}
+
+impl MovementMode {
+    fn settings(&self, grounded: bool) -> (CharacterMovement, CharacterForces) {
+        match (self, grounded) {
+            (MovementMode::Walking, true) => (
+                CharacterMovement::DEFAULT_GROUND,
+                CharacterForces::DEFAULT_GROUND,
+            ),
+            (MovementMode::Walking, false) => {
+                (CharacterMovement::DEFAULT_AIR, CharacterForces::DEFAULT_AIR)
+            }
+            (MovementMode::Flying, _) => (
+                CharacterMovement::DEFAULT_GROUND,
+                CharacterForces {
+                    drag: 10.0,
+                    gravity: Vec3::ZERO,
+                    friction: 0.0,
+                },
+            ),
+        }
+    }
 }
 
 fn setup(
@@ -148,7 +171,6 @@ fn setup(
 
     commands.spawn((
         Name::new("Player"),
-        CollisionEventsEnabled,
         MovementMode::Walking,
         (
             DebugMotion::default(),
@@ -171,6 +193,7 @@ fn setup(
         // Sensor,
         walking_actions(),
         Mass(10.0),
+        CollisionEventsEnabled,
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -274,23 +297,21 @@ fn walking_actions() -> Actions<Walking> {
 
 fn on_toggle_fly_mode(
     trigger: Trigger<Fired<ToggleFlyMode>>,
-    mut query: Query<(&mut MovementMode, &mut CharacterMovement)>,
+    mut query: Query<(&mut MovementMode, &mut CharacterForces)>,
 ) {
-    let (mut mode, mut movement) = query.get_mut(trigger.target()).unwrap();
+    let (mut mode, mut forces) = query.get_mut(trigger.target()).unwrap();
     match *mode {
         MovementMode::Walking => {
             *mode = MovementMode::Flying;
 
-            movement.drag = 10.0;
-            movement.air_acceleratin = 60.0;
-            movement.gravity = Vec3::ZERO;
+            forces.drag = 10.0;
+            forces.gravity = Vec3::ZERO;
         }
         MovementMode::Flying => {
             *mode = MovementMode::Walking;
 
-            movement.drag = 0.01;
-            movement.air_acceleratin = 20.0;
-            movement.gravity = Vec3::NEG_Y * 20.0;
+            forces.drag = 0.01;
+            forces.gravity = Vec3::NEG_Y * 20.0;
         }
     }
 }
@@ -332,13 +353,28 @@ fn on_toggle_perspective(
 
 fn on_jump(
     trigger: Trigger<Fired<Jump>>,
-    mut query: Query<(&mut Character, &CharacterMovement, &MovementMode)>,
+    mut query: Query<(&mut Character, &MovementMode)>,
 ) -> Result {
-    let (mut character, movement, mode) = query.get_mut(trigger.target())?;
+    let (mut character, mode) = query.get_mut(trigger.target())?;
     if let MovementMode::Walking = mode {
-        character.jump(movement.jump_impulse);
+        character.jump(7.0);
     }
     Ok(())
+}
+
+fn update_movement_settings(
+    mut query: Query<(
+        &Character,
+        &mut CharacterMovement,
+        &mut CharacterForces,
+        &MovementMode,
+    )>,
+) {
+    for (character, mut movement, mut forces, mode) in &mut query {
+        let (new_movement, new_forces) = mode.settings(character.is_grounded());
+        *movement = new_movement;
+        *forces = new_forces;
+    }
 }
 
 fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
@@ -407,17 +443,6 @@ fn update_camera_offset(
     }
 
     Ok(())
-}
-
-fn bleh(mut query: Query<(&mut InheritedVelocity, &Transform)>) {
-    // for (mut platform_velocity, transform) in &mut query {
-    //     *platform_velocity = PlatformVelocity::calculate(
-    //         &GlobalTransform::default(),
-    //         Vec3::ZERO,
-    //         Vec3::new(0.0, 1.0, 0.0),
-    //         transform.translation,
-    //     );
-    // }
 }
 
 fn update_attachments(
