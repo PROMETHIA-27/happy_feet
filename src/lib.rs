@@ -365,11 +365,12 @@ fn physics_interactions(
 
         linear_velocity.0 += impulse_direction * linear_acceleration;
 
-        let contact_point = hit.point1;
+        // Angular push
+
         let center_of_mass = transform.transform_point(center_of_mass.0);
+        let contact_point = hit.point1;
         let contact_offset = contact_point - center_of_mass;
 
-        // let angular_force = incoming_speed * depth * character_mass.value() * time.delta_secs();
         let torque = contact_offset.cross(impulse_direction * linear_force);
 
         // Get current angular velocity in the torque direction
@@ -378,9 +379,14 @@ fn physics_interactions(
         };
         let current_angular_speed = angular_velocity.0.dot(*torque_axis);
 
+        const MAX_TORQUE: f32 = 100.0;
+
         let angular_acceleration = f32::min(
             f32::max(0.0, incoming_speed - current_angular_speed),
-            (inertia.inverse() * torque).length(),
+            f32::min(
+                MAX_TORQUE * time.delta_secs(),
+                (inertia.inverse() * torque).length(),
+            ),
         );
 
         // Apply limited angular change
