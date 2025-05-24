@@ -3,7 +3,9 @@ use std::mem;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{CollisionState, ground::Ground, is_walkable, projection::Surface};
+use crate::{
+    CollideAndSlideFilter, CollisionState, ground::Ground, is_walkable, projection::Surface,
+};
 
 #[derive(Reflect, Debug, Clone, Copy)]
 pub(crate) struct SweepHitData {
@@ -180,7 +182,10 @@ pub(crate) struct MovementImpact {
     pub hit: SweepHitData,
 }
 
-pub(crate) struct CollideAndSlideConfig {
+#[derive(Component, Reflect, Debug, Clone, Copy)]
+#[reflect(Component, Default)]
+#[require(CollideAndSlideFilter)]
+pub struct CollideAndSlideConfig {
     pub max_iterations: u8,
     pub skin_width: f32,
 }

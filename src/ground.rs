@@ -8,23 +8,26 @@ use crate::sweep::{SweepHitData, sweep};
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(Grounding)]
-pub struct GroundingSettings {
-    /// Mask for walkable ground
+pub struct GroundingConfig {
+    /// Mask for walkable ground, not currently used
     pub layer_mask: Option<LayerMask>,
     /// Max walkable angle
     pub max_angle: f32,
     /// Max distance from the ground
     pub max_distance: f32,
     pub snap_to_surface: bool,
+    /// The up direction.
+    pub up: Dir3,
 }
 
-impl Default for GroundingSettings {
+impl Default for GroundingConfig {
     fn default() -> Self {
         Self {
             layer_mask: None,
             max_angle: PI / 4.0,
             max_distance: 0.2,
             snap_to_surface: true,
+            up: Dir3::Y,
         }
     }
 }
@@ -34,7 +37,7 @@ impl Default for GroundingSettings {
 #[reflect(Component, Default)]
 pub struct Grounding {
     pub(crate) inner_ground: Option<Ground>,
-    /// If the character should be forced to unground, e.g., after jumping.
+    /// If the character should be forced to detach from the ground, e.g., after jumping.
     should_detach: bool,
 }
 

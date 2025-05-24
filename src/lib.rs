@@ -3,14 +3,14 @@ use std::mem;
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
-use ground::{Ground, Grounding, GroundingSettings, ground_check, is_walkable};
+use ground::{Ground, Grounding, GroundingConfig, ground_check, is_walkable};
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
 use sweep::{CollideAndSlideConfig, MovementImpact, collide_and_slide, step_check, sweep};
 
 pub mod debug;
 pub mod ground;
 pub(crate) mod projection;
-pub(crate) mod sweep;
+pub mod sweep;
 
 pub struct KinematicCharacterPlugin;
 
@@ -40,7 +40,7 @@ impl Plugin for KinematicCharacterPlugin {
                     .before(PhysicsSet::Prepare),
                 (
                     make_character_kinematic,
-                    move_character_with_platform,
+                    update_platform_velocity,
                     move_character,
                 )
                     .after(PhysicsSet::Sync)
@@ -64,7 +64,7 @@ pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
 }
 
 pub(crate) fn update_character_filter(
-    mut query: Query<(Entity, &mut CharacterFilter, &CollisionLayers)>,
+    mut query: Query<(Entity, &mut CollideAndSlideFilter, &CollisionLayers)>,
     sensors: Query<Entity, With<Sensor>>,
 ) {
     for (entity, mut filter, collidion_layers) in &mut query {
@@ -83,14 +83,14 @@ pub(crate) fn update_character_filter(
 pub(crate) fn character_gravity(
     gravity: Res<Gravity>,
     mut query: Query<(
-        &mut Character,
+        &mut KinematicVelocity,
         Option<&Grounding>,
         Option<&CharacterGravity>,
         Option<&GravityScale>,
     )>,
     time: Res<Time>,
 ) {
-    for (mut character, grounding, character_gravity, gravity_scale) in &mut query {
+    for (mut velocity, grounding, character_gravity, gravity_scale) in &mut query {
         if grounding.map_or(false, |g| g.is_grounded()) {
             continue;
         }
@@ -98,18 +98,18 @@ pub(crate) fn character_gravity(
         let gravity = character_gravity.map(|g| g.0).unwrap_or(gravity.0)
             * gravity_scale.map(|g| g.0).unwrap_or(1.0);
 
-        character.velocity += gravity * time.delta_secs();
+        velocity.0 += gravity * time.delta_secs();
     }
 }
 
 pub(crate) fn character_friction(
     default_friction: Res<DefaultFriction>,
-    mut characters: Query<(&mut Character, &Grounding, &CharacterFriction)>,
+    mut characters: Query<(&mut KinematicVelocity, &Grounding, &CharacterFriction)>,
     frictions: Query<&Friction>,
     colliders: Query<&ColliderOf>,
     time: Res<Time>,
 ) {
-    for (mut character, grounding, character_friction) in &mut characters {
+    for (mut velocity, grounding, character_friction) in &mut characters {
         let Some(ground) = grounding.ground() else {
             continue;
         };
@@ -125,48 +125,53 @@ pub(crate) fn character_friction(
         }
 
         let f = friction_factor(
-            character.velocity,
+            velocity.0,
             character_friction.0 * friction_scale,
             time.delta_secs(),
         );
 
-        character.velocity *= f;
+        velocity.0 *= f;
     }
 }
 
-pub(crate) fn character_drag(mut query: Query<(&mut Character, &CharacterDrag)>, time: Res<Time>) {
-    for (mut character, drag) in &mut query {
-        character.velocity *= drag_factor(drag.0, time.delta_secs());
+pub(crate) fn character_drag(
+    mut query: Query<(&mut KinematicVelocity, &CharacterDrag)>,
+    time: Res<Time>,
+) {
+    for (mut velocity, drag) in &mut query {
+        velocity.0 *= drag_factor(drag.0, time.delta_secs());
     }
 }
 
 pub(crate) fn character_acceleration(
     mut query: Query<(
         &MoveInput,
-        &mut Character,
-        Option<&Grounding>,
+        &mut KinematicVelocity,
+        Option<(&Grounding, &GroundingConfig)>,
         &CharacterMovement,
         Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
-    for (move_input, mut character, grounding, movement, debug_mode) in &mut query {
+    for (move_input, mut character_velocity, grounding, movement, debug_mode) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
 
         if debug_mode {
-            character.velocity = direction * movement.target_speed * throttle;
+            character_velocity.0 = direction * movement.target_speed * throttle;
             continue;
         }
 
-        let (direction, velocity) = match grounding.and_then(|g| g.normal()) {
-            Some(normal) => (
-                align_with_surface(*direction, *normal, *character.up),
-                align_with_surface(character.velocity, *normal, *character.up),
-            ),
-            None => (*direction, character.velocity),
-        };
+        let mut direction = *direction;
+        let mut velocity = character_velocity.0;
+
+        if let Some((grounding, grounding_settings)) = grounding {
+            if let Some(normal) = grounding.normal() {
+                direction = align_with_surface(direction, *normal, *grounding_settings.up);
+                velocity = align_with_surface(velocity, *normal, *grounding_settings.up);
+            }
+        }
 
         let move_accel = acceleration(
             velocity,
@@ -176,7 +181,7 @@ pub(crate) fn character_acceleration(
             time.delta_secs(),
         );
 
-        character.velocity += move_accel;
+        character_velocity.0 += move_accel;
     }
 }
 
@@ -186,8 +191,8 @@ pub(crate) fn depenetrate_character(
     collisions: Collisions,
     mut query: Query<(
         Entity,
-        &mut Character,
-        Option<(&mut Grounding, &GroundingSettings)>,
+        &mut KinematicVelocity,
+        Option<(&mut Grounding, &GroundingConfig)>,
         &mut Transform,
     )>,
     colliders: Query<&ColliderOf, Without<Sensor>>,
@@ -204,7 +209,7 @@ pub(crate) fn depenetrate_character(
 
         let other: Entity;
 
-        let (entity, mut character, mut grounding, mut transform) =
+        let (entity, mut velocity, mut grounding, mut transform) =
             if let Ok(character) = query.get_mut(rb1) {
                 other = rb2;
                 character
@@ -225,11 +230,14 @@ pub(crate) fn depenetrate_character(
 
             let (surface, obstruction_normal, ground_normal) = match grounding.as_ref() {
                 Some((grounding, grounding_settings)) => {
-                    let surface =
-                        Surface::new(hit_normal, grounding_settings.max_angle, character.up);
+                    let surface = Surface::new(
+                        hit_normal,
+                        grounding_settings.max_angle,
+                        grounding_settings.up,
+                    );
                     let ground_normal = grounding.normal();
                     let obstruction_normal = surface
-                        .obstruction_normal(ground_normal, character.up)
+                        .obstruction_normal(ground_normal, grounding_settings.up)
                         .unwrap();
                     (surface, obstruction_normal, ground_normal)
                 }
@@ -260,17 +268,24 @@ pub(crate) fn depenetrate_character(
                 }
             }
 
-            if character.velocity.dot(hit_normal) > 0.0 {
+            if velocity.0.dot(hit_normal) > 0.0 {
                 continue;
             }
 
-            character.velocity = project_velocity(
-                character.velocity,
-                *obstruction_normal,
-                surface.is_walkable,
-                ground_normal,
-                character.up,
-            );
+            match grounding {
+                Some((_, grounding_settings)) => {
+                    velocity.0 = project_velocity(
+                        velocity.0,
+                        *obstruction_normal,
+                        surface.is_walkable,
+                        ground_normal,
+                        grounding_settings.up,
+                    );
+                }
+                None => {
+                    velocity.0 = velocity.0.reject_from(*obstruction_normal);
+                }
+            }
 
             if surface.is_walkable {
                 if let Some((grounding, _)) = grounding.as_mut() {
@@ -326,16 +341,15 @@ fn make_character_kinematic(
 
 fn physics_interactions(
     spatial_query: SpatialQuery,
-    mut commands: Commands,
     characters: Query<
         (
-            Entity,
-            &Character,
+            &CollideAndSlideConfig,
+            &KinematicVelocity,
             Option<&Grounding>,
             &Transform,
             &Collider,
             &ComputedMass,
-            &CharacterFilter,
+            &CollideAndSlideFilter,
         ),
         Without<Sensor>,
     >,
@@ -352,8 +366,8 @@ fn physics_interactions(
     time: Res<Time>,
 ) {
     for (
-        character_entity,
-        character,
+        config,
+        character_velocity,
         grounding,
         character_transform,
         character_collider,
@@ -362,7 +376,7 @@ fn physics_interactions(
     ) in &characters
     {
         let Ok((sweep_direction, target_sweep_distance)) =
-            Dir3::new_and_length(character.velocity * time.delta_secs())
+            Dir3::new_and_length(character_velocity.0 * time.delta_secs())
         else {
             continue;
         };
@@ -373,7 +387,7 @@ fn physics_interactions(
             character_transform.rotation,
             sweep_direction,
             target_sweep_distance,
-            character.skin_width,
+            config.skin_width,
             &spatial_query,
             &filter.0,
             false,
@@ -414,7 +428,7 @@ fn physics_interactions(
             continue;
         };
 
-        let incoming_speed = character.velocity.dot(*impulse_direction);
+        let incoming_speed = character_velocity.0.dot(*impulse_direction);
 
         if incoming_speed <= 0.0 {
             continue;
@@ -472,8 +486,19 @@ pub struct OnGroundEnter(pub Ground);
 #[derive(Event, Deref)]
 pub struct OnGroundLeave(pub Ground);
 
-pub(crate) fn move_character_with_platform(
-    mut characters: Query<(&Character, &Grounding, &mut InheritedVelocity, &Transform)>,
+#[derive(Event)]
+pub struct OnStep {
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
+pub(crate) fn update_platform_velocity(
+    mut characters: Query<(
+        &KinematicVelocity,
+        &Grounding,
+        &mut InheritedVelocity,
+        &Transform,
+    )>,
     platforms: Query<(
         &LinearVelocity,
         &AngularVelocity,
@@ -482,7 +507,7 @@ pub(crate) fn move_character_with_platform(
     )>,
     time: Res<Time>,
 ) -> Result {
-    for (character, grounding, mut velocity_on_platform, transform) in &mut characters {
+    for (velocity, grounding, mut velocity_on_platform, transform) in &mut characters {
         let Some(platform) = grounding.inner_ground else {
             *velocity_on_platform = InheritedVelocity::default();
             continue;
@@ -502,7 +527,7 @@ pub(crate) fn move_character_with_platform(
             platform_linear_velocity.0,
             platform_angular_velocity.0,
             transform.translation,
-            character.velocity,
+            velocity.0,
             time.delta_secs(),
         );
     }
@@ -512,11 +537,12 @@ pub(crate) fn move_character_with_platform(
 
 pub(crate) fn inherit_platform_velocity(
     trigger: Trigger<OnGroundLeave>,
-    mut query: Query<(&mut Character, &mut InheritedVelocity)>,
-) -> Result {
-    let (mut character, mut platform_velocity) = query.get_mut(trigger.target())?;
-    character.velocity += mem::take(&mut platform_velocity.0);
-    Ok(())
+    mut query: Query<(&mut KinematicVelocity, &mut InheritedVelocity)>,
+) {
+    let Ok((mut velocity, mut platform_velocity)) = query.get_mut(trigger.target()) else {
+        return;
+    };
+    velocity.0 += mem::take(&mut platform_velocity.0);
 }
 
 pub(crate) fn move_character(
@@ -524,13 +550,14 @@ pub(crate) fn move_character(
     spatial_query: SpatialQuery,
     mut query: Query<(
         Entity,
-        &mut Character,
-        &InheritedVelocity,
-        Option<(&mut Grounding, &GroundingSettings)>,
-        Option<&SteppingSettings>,
+        &CollideAndSlideConfig,
+        &mut KinematicVelocity,
+        Option<&InheritedVelocity>,
+        Option<(&mut Grounding, &GroundingConfig)>,
+        Option<&SteppingConfig>,
         &mut Transform,
         &Collider,
-        &CharacterFilter,
+        &CollideAndSlideFilter,
         Has<Sensor>,
         Option<&mut DebugMotion>,
         Has<DebugMode>,
@@ -542,7 +569,8 @@ pub(crate) fn move_character(
 ) -> Result {
     for (
         entity,
-        mut character,
+        config,
+        mut velocity,
         platform_velocity,
         mut grounding,
         stepping_settings,
@@ -554,10 +582,12 @@ pub(crate) fn move_character(
         debug_mode,
     ) in &mut query
     {
-        transform.translation += platform_velocity.0 * time.delta_secs();
+        if let Some(platform_velocity) = platform_velocity {
+            transform.translation += platform_velocity.0 * time.delta_secs();
+        }
 
         if is_sensor {
-            transform.translation += character.velocity * time.delta_secs();
+            transform.translation += velocity.0 * time.delta_secs();
             continue;
         }
 
@@ -566,14 +596,24 @@ pub(crate) fn move_character(
 
         if debug_mode {
             if let Some(lines) = debug_motion.as_mut() {
+                let mut point = transform.translation;
+
+                if let Some((_, grounding_settings)) = grounding {
+                    point += feet_position(
+                        collider,
+                        transform.rotation,
+                        grounding_settings.up,
+                        config.skin_width,
+                    );
+                }
+
                 lines.push(
                     0.0,
                     DebugPoint {
                         translation: transform.translation,
-                        velocity: character.velocity,
+                        velocity: velocity.0,
                         hit: current_ground_normal.map(|normal| DebugHit {
-                            point: transform.translation
-                                + character.feet_position(collider, transform.rotation),
+                            point,
                             normal: *normal,
                             is_walkable: true,
                         }),
@@ -612,22 +652,21 @@ pub(crate) fn move_character(
             collider,
             transform.translation,
             transform.rotation,
-            character.velocity,
+            velocity.0,
             current_ground_normal,
-            CollideAndSlideConfig {
-                max_iterations: character.max_slide_count,
-                skin_width: character.skin_width,
-            },
+            *config,
             &filter.0,
             &spatial_query,
             duration,
-            |velocity, surface| {
-                surface.project_velocity(velocity, current_ground_normal, character.up)
+            |velocity, surface| match grounding {
+                Some((_, grounding_settings)) => {
+                    surface.project_velocity(velocity, current_ground_normal, grounding_settings.up)
+                }
+                None => velocity.reject_from(*surface.normal),
             },
             |state,
              MovementImpact {
                  end,
-                 direction,
                  remaining_motion,
                  hit,
                  ..
@@ -636,7 +675,7 @@ pub(crate) fn move_character(
                     Some((grounding, grounding_settings)) => Surface::new(
                         hit.normal,
                         walkable_angle(grounding_settings.max_angle, grounding.is_grounded()),
-                        character.up,
+                        grounding_settings.up,
                     ),
                     None => Surface {
                         normal: Dir3::new(hit.normal).unwrap(),
@@ -652,7 +691,8 @@ pub(crate) fn move_character(
                         SteppingBehaviour::Never => false,
                         SteppingBehaviour::Grounded => grounding.is_grounded(),
                         SteppingBehaviour::GroundedOrFalling => {
-                            grounding.is_grounded() || state.velocity.dot(*character.up) < 0.0
+                            grounding.is_grounded()
+                                || state.velocity.dot(*grounding_settings.up) < 0.0
                         }
                         SteppingBehaviour::Always => true,
                     };
@@ -665,26 +705,29 @@ pub(crate) fn move_character(
                     let try_step = !surface.is_walkable && !is_dynamic && step_condition;
 
                     if try_step {
-                        if let Ok((direction, motion)) = Dir3::new_and_length(
-                            direction.reject_from(*character.up) * remaining_motion,
-                        ) {
+                        if let Ok(direction) =
+                            Dir3::new(velocity.0.reject_from(*grounding_settings.up))
+                        {
                             if let Some((offset, hit)) = step_check(
                                 collider,
                                 end,
                                 transform.rotation,
                                 direction,
-                                motion,
-                                character.up,
+                                remaining_motion,
+                                grounding_settings.up,
                                 grounding_settings.max_angle,
                                 1.0,
                                 0.1,
                                 stepping_settings.max_height,
-                                character.skin_width,
+                                config.skin_width,
                                 &spatial_query,
                                 &filter.0,
                             ) {
-                                state.velocity =
-                                    align_with_surface(state.velocity, hit.normal, *character.up);
+                                state.velocity = align_with_surface(
+                                    state.velocity,
+                                    hit.normal,
+                                    *grounding_settings.up,
+                                );
                                 state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
 
@@ -730,14 +773,20 @@ pub(crate) fn move_character(
                     collider,
                     new_translation,
                     transform.rotation,
-                    character.up,
+                    grounding_settings.up,
                     grounding_settings.max_distance,
-                    character.skin_width,
+                    config.skin_width,
                     walkable_angle(grounding_settings.max_angle, grounding.is_grounded()),
                     &spatial_query,
                     &filter.0,
                 ) {
                     movement.ground = Some(ground);
+
+                    movement.velocity = align_with_surface(
+                        movement.velocity,
+                        *ground.normal,
+                        *grounding_settings.up,
+                    );
 
                     let mut hit_roof = !grounding_settings.snap_to_surface;
 
@@ -746,9 +795,9 @@ pub(crate) fn move_character(
                             collider,
                             transform.translation,
                             transform.rotation,
-                            character.up,
+                            grounding_settings.up,
                             -hit.distance,
-                            character.skin_width,
+                            config.skin_width,
                             &spatial_query,
                             &filter.0,
                             true,
@@ -757,7 +806,7 @@ pub(crate) fn move_character(
                     }
 
                     if !hit_roof {
-                        new_translation -= character.up * hit.distance;
+                        new_translation -= grounding_settings.up * hit.distance;
                     }
                 } else {
                     movement.ground = None;
@@ -785,14 +834,24 @@ pub(crate) fn move_character(
         if draw_line {
             let lines = debug_motion.as_mut().unwrap();
 
+            let mut point = new_translation;
+
+            if let Some((_, grounding_settings)) = grounding {
+                point += feet_position(
+                    collider,
+                    transform.rotation,
+                    grounding_settings.up,
+                    config.skin_width,
+                );
+            }
+
             lines.push(
                 movement.remaining_time,
                 DebugPoint {
                     translation: new_translation,
                     velocity: movement.velocity,
                     hit: movement.ground.map(|ground| DebugHit {
-                        point: new_translation
-                            + character.feet_position(collider, transform.rotation),
+                        point,
                         normal: *ground.normal,
                         is_walkable: true,
                     }),
@@ -802,7 +861,7 @@ pub(crate) fn move_character(
 
         if !debug_mode {
             transform.translation = new_translation;
-            character.velocity = movement.velocity;
+            velocity.0 = movement.velocity;
             if let Some((grounding, _)) = grounding.as_mut() {
                 **grounding = Grounding::new(movement.ground);
             }
@@ -864,9 +923,11 @@ pub(crate) fn inherited_velocity_at_point(
     inherited_velocity
 }
 
-pub(crate) struct RelativeVelocity(pub Vec3);
+#[derive(Component, Reflect, Debug, Default, Clone, Copy)]
+#[reflect(Component)]
+pub struct KinematicVelocity(pub Vec3);
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Reflect, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SteppingBehaviour {
     Never,
     Grounded,
@@ -874,14 +935,16 @@ pub enum SteppingBehaviour {
     Always,
 }
 
-#[derive(Component, Debug, PartialEq, Clone, Copy)]
-pub struct SteppingSettings {
+#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
+#[reflect(Component, Default)]
+#[require(GroundingConfig)]
+pub struct SteppingConfig {
     pub layer_mask: Option<LayerMask>,
     pub max_height: f32,
     pub behaviour: SteppingBehaviour,
 }
 
-impl Default for SteppingSettings {
+impl Default for SteppingConfig {
     fn default() -> Self {
         Self {
             layer_mask: None,
@@ -891,107 +954,23 @@ impl Default for SteppingSettings {
     }
 }
 
-#[derive(Component, Reflect, Debug, Clone, Copy)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[reflect(Component, Default)]
 #[require(
     RigidBody = RigidBody::Kinematic,
     Collider = Capsule3d::new(0.4, 1.0),
-    CharacterFilter,
+    KinematicVelocity,
     InheritedVelocity,
+    GroundingConfig,
+    CollideAndSlideConfig,
+    CollideAndSlideFilter,
+    MoveInput,
 )]
-pub struct Character {
-    pub velocity: Vec3,
-    pub up: Dir3,
-    pub skin_width: f32,
-    pub max_slide_count: u8,
-    pub previous_ground: Option<Ground>,
-}
-
-impl Default for Character {
-    fn default() -> Self {
-        Self {
-            velocity: Vec3::ZERO,
-            up: Dir3::Y,
-            skin_width: 0.02,
-            max_slide_count: 8,
-            previous_ground: None,
-        }
-    }
-}
-
-pub fn jump(impulse: f32, character: &mut Character, grounding: &mut Grounding) {
-    // Remove vertical velocity
-    character.velocity = character.velocity.reject_from(*character.up);
-
-    // Push the character away from ramps
-    if let Some(ground) = grounding.detach() {
-        let impulse = ground.normal * character.velocity.dot(*ground.normal).min(0.0);
-
-        let vertical = impulse.project_onto(*character.up);
-        let mut horizontal = impulse - vertical;
-
-        // Reorient horizontal impulse to original velocity direction
-        if let Ok(direction) = Dir3::new(character.velocity) {
-            horizontal = horizontal.project_onto(*direction);
-        }
-
-        character.velocity -= horizontal + vertical;
-    }
-
-    character.velocity += character.up * impulse;
-}
-
-impl Character {
-    // /// Launch the character, clearing the grounded state if launched away from the `ground` normal.
-    // pub fn launch(&mut self, impulse: Vec3) {
-    //     if let Some(ground) = self.grounding.ground() {
-    //         // Clear grounded if launched away from the ground
-    //         if ground.normal.dot(impulse) > 0.0 {
-    //             self.grounding.detach();
-    //         }
-    //     }
-
-    //     self.velocity += impulse
-    // }
-
-    // /// Launch the character on the `up` axis, overriding the downward velocity.
-    // pub fn jump(&mut self, impulse: f32) {
-    //     // Remove vertical velocity
-    //     self.velocity = self.velocity.reject_from(*self.up);
-
-    //     // Push the character away from ramps
-    //     if let Some(ground) = self.grounding.detach() {
-    //         let impulse = ground.normal * self.velocity.dot(*ground.normal).min(0.0);
-
-    //         let vertical = impulse.project_onto(*self.up);
-    //         let mut horizontal = impulse - vertical;
-
-    //         // Reorient horizontal impulse to original velocity direction
-    //         if let Ok(direction) = Dir3::new(self.velocity) {
-    //             horizontal = horizontal.project_onto(*direction);
-    //         }
-
-    //         self.velocity -= horizontal + vertical;
-    //     }
-
-    //     self.velocity += self.up * impulse;
-    // }
-
-    // /// Returns `true` if the character is standing on the ground.
-    // pub fn is_grounded(&self) -> bool {
-    //     self.grounding.is_grounded()
-    // }
-
-    pub fn feet_position(&self, shape: &Collider, rotation: Quat) -> Vec3 {
-        let aabb = shape.aabb(Vec3::ZERO, rotation);
-        let down = aabb.min.dot(*self.up) - self.skin_width;
-        self.up * down
-    }
-}
+pub struct Character;
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
-#[require(MoveInput)]
+#[require(MoveInput, KinematicVelocity)]
 pub struct CharacterMovement {
     pub target_speed: f32,
     pub acceleration: f32,
@@ -1011,6 +990,7 @@ impl CharacterMovement {
 
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
+#[require(KinematicVelocity)]
 pub struct CharacterGravity(pub Vec3);
 
 impl Default for CharacterGravity {
@@ -1025,6 +1005,7 @@ impl CharacterGravity {
 
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
+#[require(KinematicVelocity)]
 pub struct CharacterFriction(pub f32);
 
 impl Default for CharacterFriction {
@@ -1039,6 +1020,7 @@ impl CharacterFriction {
 
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
+#[require(KinematicVelocity)]
 pub struct CharacterDrag(pub f32);
 
 impl Default for CharacterDrag {
@@ -1056,7 +1038,7 @@ impl CharacterDrag {
 /// This has to be a seperate component because otherwise the `character` cannot be mutated during a `move_and_slide` loop.
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
-pub struct CharacterFilter(pub(crate) SpatialQueryFilter);
+pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 
 #[derive(Component, Reflect, Default, Debug, Clone, Copy)]
 #[reflect(Component)]
@@ -1078,6 +1060,34 @@ impl MoveInput {
     pub fn previous(&self) -> Vec3 {
         self.previous
     }
+}
+
+pub fn jump(impulse: f32, velocity: &mut KinematicVelocity, grounding: &mut Grounding, up: Dir3) {
+    // Remove vertical velocity
+    velocity.0 = velocity.0.reject_from(*up);
+
+    // Push the character away from ramps
+    if let Some(ground) = grounding.detach() {
+        let impulse = ground.normal * velocity.0.dot(*ground.normal).min(0.0);
+
+        let vertical = impulse.project_onto(*up);
+        let mut horizontal = impulse - vertical;
+
+        // Reorient horizontal impulse to original velocity direction
+        if let Ok(direction) = Dir3::new(velocity.0) {
+            horizontal = horizontal.project_onto(*direction);
+        }
+
+        velocity.0 -= horizontal + vertical;
+    }
+
+    velocity.0 += up * impulse;
+}
+
+pub fn feet_position(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32) -> Vec3 {
+    let aabb = shape.aabb(Vec3::ZERO, rotation);
+    let down = aabb.min.dot(*up) - skin_width;
+    up * down
 }
 
 fn apply_impulse_on_point(

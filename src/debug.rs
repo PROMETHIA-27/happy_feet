@@ -3,7 +3,12 @@ use std::collections::VecDeque;
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
 
-use crate::{Character, CharacterMovement, MoveInput, ground::Grounding, move_character};
+use crate::{
+    Character, CharacterMovement, KinematicVelocity, MoveInput, feet_position,
+    ground::{Grounding, GroundingConfig},
+    move_character,
+    sweep::CollideAndSlideConfig,
+};
 
 pub(crate) fn plugin(app: &mut App) {
     app.insert_gizmo_config(
@@ -37,7 +42,8 @@ fn draw_input_arrow(
     query: Query<
         (
             &Transform,
-            &Character,
+            &GroundingConfig,
+            &KinematicVelocity,
             &CharacterMovement,
             &Collider,
             &MoveInput,
@@ -45,18 +51,18 @@ fn draw_input_arrow(
         With<DebugInput>,
     >,
 ) {
-    for (transform, character, movement, collider, move_input) in &query {
+    for (transform, grounding_settings, velocity, movement, collider, move_input) in &query {
         let half_height = collider
             .aabb(Vec3::ZERO, transform.rotation)
             .size()
-            .dot(character.up * 0.5);
+            .dot(grounding_settings.up * 0.5);
 
         if let Ok(direction) = Dir3::new(move_input.previous()) {
-            let speed_len = character.velocity.dot(*direction) / movement.target_speed;
+            let speed_len = velocity.0.dot(*direction) / movement.target_speed;
             let accel_len = 1.0 - speed_len.clamp(0.0, 1.0);
 
-            let origin = transform.translation - character.up * half_height;
-            let right = character.up.cross(*direction);
+            let origin = transform.translation - grounding_settings.up * half_height;
+            let right = grounding_settings.up.cross(*direction);
 
             let color = BLACK
                 .mix(&VIOLET, accel_len)
@@ -139,8 +145,10 @@ impl DebugMotion {
 fn draw_motion(
     mut gizmos: Gizmos<CharacterGizmos>,
     mut query: Query<(
-        &Character,
-        Option<&Grounding>,
+        &CollideAndSlideConfig,
+        &KinematicVelocity,
+        &Grounding,
+        &GroundingConfig,
         &CharacterMovement,
         &Collider,
         &Transform,
@@ -148,8 +156,17 @@ fn draw_motion(
         Has<DebugMode>,
     )>,
 ) {
-    for (character, grounding, movement, collider, transform, mut debug_motion, debug_mode) in
-        &mut query
+    for (
+        config,
+        velocity,
+        grounding,
+        grounding_settings,
+        movement,
+        collider,
+        transform,
+        mut debug_motion,
+        debug_mode,
+    ) in &mut query
     {
         let line_color = |t: f32, velocity: Vec3| {
             let target_speed_sq = movement.target_speed * movement.target_speed;
@@ -177,7 +194,13 @@ fn draw_motion(
             let (_, a) = debug_motion.points[i];
 
             points.push((
-                a.translation + character.feet_position(collider, transform.rotation) / 1.5,
+                a.translation
+                    + feet_position(
+                        collider,
+                        transform.rotation,
+                        grounding_settings.up,
+                        config.skin_width,
+                    ) / 1.5,
                 line_color(
                     debug_motion.duration_at(i) / debug_motion.duration,
                     a.velocity,
@@ -188,8 +211,14 @@ fn draw_motion(
         // Draw last line to character if debug mode is disabled
         if !debug_mode {
             points.push((
-                transform.translation + character.feet_position(collider, transform.rotation) / 1.5,
-                line_color(1.0, character.velocity),
+                transform.translation
+                    + feet_position(
+                        collider,
+                        transform.rotation,
+                        grounding_settings.up,
+                        config.skin_width,
+                    ) / 1.5,
+                line_color(1.0, velocity.0),
             ));
         }
 
@@ -203,7 +232,7 @@ fn draw_motion(
 
             let (point, normal, color) = match debug.hit {
                 Some(hit) => {
-                    let point = hit.point + hit.normal * character.skin_width;
+                    let point = hit.point + hit.normal * config.skin_width;
                     let normal = hit.normal;
 
                     let color = match hit.is_walkable {
@@ -225,23 +254,28 @@ fn draw_motion(
                     (point, normal, color)
                 }
                 None => {
-                    let point =
-                        debug.translation + character.feet_position(collider, transform.rotation);
+                    let point = debug.translation
+                        + feet_position(
+                            collider,
+                            transform.rotation,
+                            grounding_settings.up,
+                            config.skin_width,
+                        );
 
                     let color = color[1];
 
                     gizmos.line_gradient(
                         point,
-                        point - character.up * 0.5,
+                        point - grounding_settings.up * 0.5,
                         color,
                         color.with_alpha(0.0),
                     );
 
-                    (point, *character.up, color)
+                    (point, *grounding_settings.up, color)
                 }
             };
 
-            let forward = Dir3::new(normal.cross(*character.up)).unwrap_or(Dir3::NEG_Z);
+            let forward = Dir3::new(normal.cross(*grounding_settings.up)).unwrap_or(Dir3::NEG_Z);
 
             let transform = Transform::from_translation(point).looking_to(normal, forward);
 
@@ -262,14 +296,19 @@ fn draw_motion(
             debug_motion.clear();
         } else {
             // Only draw last point at character if debug mode is disabled
-            let ground_normal = grounding.and_then(|g| g.normal());
+            let ground_normal = grounding.normal();
 
             dbg_point(DebugPoint {
                 translation: transform.translation,
-                velocity: character.velocity,
+                velocity: velocity.0,
                 hit: ground_normal.map(|normal| DebugHit {
                     point: transform.translation
-                        + character.feet_position(collider, transform.rotation),
+                        + feet_position(
+                            collider,
+                            transform.rotation,
+                            grounding_settings.up,
+                            config.skin_width,
+                        ),
                     normal: *normal,
                     is_walkable: true,
                 }),

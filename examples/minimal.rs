@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, fmt::DebugMap};
+use std::f32::consts::PI;
 
 use avian3d::prelude::*;
 use bevy::{
@@ -10,12 +10,12 @@ use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
     Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
-    InheritedVelocity, KinematicCharacterPlugin, MoveInput, OnGroundEnter, OnGroundLeave,
-    SteppingBehaviour, SteppingSettings,
+    InheritedVelocity, KinematicCharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter,
+    OnGroundLeave, SteppingBehaviour, SteppingConfig,
     debug::{DebugInput, DebugMode, DebugMotion},
-    ground::GroundingSettings,
-    ground::{Ground, Grounding},
+    ground::{Grounding, GroundingConfig},
     jump,
+    sweep::CollideAndSlideConfig,
 };
 
 fn main() -> AppExit {
@@ -188,24 +188,25 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         (
+            InheritedVelocity::default(),
             DebugMotion::default(),
             DebugInput,
-            Character {
-                skin_width: 0.1,
-                ..Default::default()
-            },
             CharacterMovement::DEFAULT_AIR,
             CharacterGravity::default(),
             CharacterFriction::default(),
             CharacterDrag::default(),
-            SteppingSettings {
+            SteppingConfig {
                 max_height: 0.4,
                 behaviour: SteppingBehaviour::Always,
                 ..Default::default()
             },
-            GroundingSettings {
+            GroundingConfig {
                 max_angle: PI / 4.0 + 0.1,
                 max_distance: 0.2,
+                ..Default::default()
+            },
+            CollideAndSlideConfig {
+                skin_width: 0.1,
                 ..Default::default()
             },
         ),
@@ -372,20 +373,23 @@ fn on_toggle_perspective(
 
 fn on_jump(
     trigger: Trigger<Fired<Jump>>,
-    mut query: Query<(&mut Character, &mut Grounding, &MovementMode)>,
+    mut query: Query<(
+        &mut KinematicVelocity,
+        &mut Grounding,
+        &GroundingConfig,
+        &MovementMode,
+    )>,
 ) -> Result {
-    let (mut character, mut grounding, mode) = query.get_mut(trigger.target())?;
+    let (mut velocity, mut grounding, grounding_settings, mode) =
+        query.get_mut(trigger.target())?;
     if let MovementMode::Walking = mode {
-        // character.jump(7.0);
-
-        jump(7.0, &mut character, &mut grounding);
+        jump(7.0, &mut velocity, &mut grounding, grounding_settings.up);
     }
     Ok(())
 }
 
 fn update_movement_settings(
     mut query: Query<(
-        &Character,
         &Grounding,
         &mut CharacterMovement,
         &mut CharacterDrag,
@@ -394,9 +398,7 @@ fn update_movement_settings(
         &MovementMode,
     )>,
 ) {
-    for (character, grounding, mut movement, mut drag, mut gravity, mut friction, mode) in
-        &mut query
-    {
+    for (grounding, mut movement, mut drag, mut gravity, mut friction, mode) in &mut query {
         let (new_movement, new_drag, new_gravity, new_friction) =
             mode.settings(grounding.is_grounded());
         *movement = new_movement;
@@ -459,13 +461,13 @@ fn look_input(
 }
 
 fn update_camera_offset(
-    characters: Query<&Character>,
+    characters: Query<&GroundingConfig>,
     mut cameras: Query<(&mut Transform, &PlayerCamera, &AttachedTo)>,
 ) -> Result {
     for (mut camera_transform, player_camera, attached_to) in &mut cameras {
-        let character = characters.get(attached_to.0)?;
+        let grounding_settings = characters.get(attached_to.0)?;
 
-        let mut offset = character.up * player_camera.eye_height;
+        let mut offset = grounding_settings.up * player_camera.eye_height;
         offset += camera_transform.rotation * Vec3::Z * player_camera.distance;
 
         camera_transform.translation += offset;
