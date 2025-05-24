@@ -1,19 +1,44 @@
-use std::fmt::Debug;
+use std::{f32::consts::PI, fmt::Debug};
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{Surface, sweep};
+use crate::sweep;
+
+#[derive(Component, Reflect, Debug, Clone, Copy)]
+#[reflect(Component, Default)]
+#[require(Grounding)]
+pub struct GroundingSettings {
+    /// Mask for walkable ground
+    pub layer_mask: Option<LayerMask>,
+    /// Max walkable angle
+    pub max_angle: f32,
+    /// Max distance from the ground
+    pub max_distance: f32,
+    pub snap_to_surface: bool,
+}
+
+impl Default for GroundingSettings {
+    fn default() -> Self {
+        Self {
+            layer_mask: None,
+            max_angle: PI / 4.0,
+            max_distance: 0.2,
+            snap_to_surface: true,
+        }
+    }
+}
 
 /// The ground state of a character.
-#[derive(Reflect, Default, Debug, PartialEq, Clone, Copy)]
-pub struct CharacterGrounding {
+#[derive(Component, Reflect, Default, Debug, PartialEq, Clone, Copy)]
+#[reflect(Component, Default)]
+pub struct Grounding {
     pub(crate) inner_ground: Option<Ground>,
     /// If the character should be forced to unground, e.g., after jumping.
     should_detach: bool,
 }
 
-impl CharacterGrounding {
+impl Grounding {
     pub fn new(surface: Option<Ground>) -> Self {
         Self {
             inner_ground: surface,
@@ -56,14 +81,24 @@ impl CharacterGrounding {
     pub fn entity(&self) -> Option<Entity> {
         self.ground().map(|ground| ground.entity)
     }
+
+    pub fn inner_ground(&self) -> Option<Ground> {
+        self.inner_ground
+    }
 }
 
-impl From<Ground> for CharacterGrounding {
-    fn from(value: Ground) -> Self {
+impl From<Option<Ground>> for Grounding {
+    fn from(value: Option<Ground>) -> Self {
         Self {
-            inner_ground: Some(value),
+            inner_ground: value,
             ..Default::default()
         }
+    }
+}
+
+impl From<Ground> for Grounding {
+    fn from(value: Ground) -> Self {
+        Self::from(Some(value))
     }
 }
 

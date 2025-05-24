@@ -9,10 +9,13 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterForces, CharacterMovement, GroundingSettings, InheritedVelocity,
-    KinematicCharacterPlugin, MoveInput, OnGroundEnter, OnGroundLeave, SteppingBehaviour,
-    SteppingSettings,
+    Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
+    InheritedVelocity, KinematicCharacterPlugin, MoveInput, OnGroundEnter, OnGroundLeave,
+    SteppingBehaviour, SteppingSettings,
     debug::{DebugInput, DebugMode, DebugMotion},
+    ground::GroundingSettings,
+    ground::{Ground, Grounding},
+    jump,
 };
 
 fn main() -> AppExit {
@@ -96,22 +99,33 @@ enum MovementMode {
 }
 
 impl MovementMode {
-    fn settings(&self, grounded: bool) -> (CharacterMovement, CharacterForces) {
+    fn settings(
+        &self,
+        grounded: bool,
+    ) -> (
+        CharacterMovement,
+        CharacterDrag,
+        CharacterGravity,
+        CharacterFriction,
+    ) {
         match (self, grounded) {
             (MovementMode::Walking, true) => (
                 CharacterMovement::DEFAULT_GROUND,
-                CharacterForces::DEFAULT_GROUND,
+                CharacterDrag::default(),
+                CharacterGravity(Vec3::NEG_Y * 20.0),
+                CharacterFriction::default(),
             ),
-            (MovementMode::Walking, false) => {
-                (CharacterMovement::DEFAULT_AIR, CharacterForces::DEFAULT_AIR)
-            }
+            (MovementMode::Walking, false) => (
+                CharacterMovement::DEFAULT_AIR,
+                CharacterDrag::default(),
+                CharacterGravity(Vec3::NEG_Y * 20.0),
+                CharacterFriction::ZERO,
+            ),
             (MovementMode::Flying, _) => (
                 CharacterMovement::DEFAULT_GROUND,
-                CharacterForces {
-                    drag: 10.0,
-                    gravity: Vec3::ZERO,
-                    friction: 0.0,
-                },
+                CharacterDrag(10.0),
+                CharacterGravity::ZERO,
+                CharacterFriction::ZERO,
             ),
         }
     }
@@ -161,6 +175,7 @@ fn setup(
         ExternalAngularImpulse::new(Vec3::new(0.0, 10.0, 0.0)).with_persistence(true),
         ExternalForce::new(Vec3::Z * 20.0),
         AngularDamping(10.0),
+        Friction::new(0.1),
     ));
 
     // let shape = Capsule3d::new(0.4, 1.0);
@@ -179,6 +194,10 @@ fn setup(
                 skin_width: 0.1,
                 ..Default::default()
             },
+            CharacterMovement::DEFAULT_AIR,
+            CharacterGravity::default(),
+            CharacterFriction::default(),
+            CharacterDrag::default(),
             SteppingSettings {
                 max_height: 0.4,
                 behaviour: SteppingBehaviour::Always,
@@ -297,21 +316,21 @@ fn walking_actions() -> Actions<Walking> {
 
 fn on_toggle_fly_mode(
     trigger: Trigger<Fired<ToggleFlyMode>>,
-    mut query: Query<(&mut MovementMode, &mut CharacterForces)>,
+    mut query: Query<(&mut MovementMode, &mut CharacterDrag, &mut CharacterGravity)>,
 ) {
-    let (mut mode, mut forces) = query.get_mut(trigger.target()).unwrap();
+    let (mut mode, mut drag, mut gravity) = query.get_mut(trigger.target()).unwrap();
     match *mode {
         MovementMode::Walking => {
             *mode = MovementMode::Flying;
 
-            forces.drag = 10.0;
-            forces.gravity = Vec3::ZERO;
+            drag.0 = 10.0;
+            gravity.0 = Vec3::ZERO;
         }
         MovementMode::Flying => {
             *mode = MovementMode::Walking;
 
-            forces.drag = 0.01;
-            forces.gravity = Vec3::NEG_Y * 20.0;
+            drag.0 = 0.01;
+            gravity.0 = Vec3::NEG_Y * 20.0;
         }
     }
 }
@@ -353,11 +372,13 @@ fn on_toggle_perspective(
 
 fn on_jump(
     trigger: Trigger<Fired<Jump>>,
-    mut query: Query<(&mut Character, &MovementMode)>,
+    mut query: Query<(&mut Character, &mut Grounding, &MovementMode)>,
 ) -> Result {
-    let (mut character, mode) = query.get_mut(trigger.target())?;
+    let (mut character, mut grounding, mode) = query.get_mut(trigger.target())?;
     if let MovementMode::Walking = mode {
-        character.jump(7.0);
+        // character.jump(7.0);
+
+        jump(7.0, &mut character, &mut grounding);
     }
     Ok(())
 }
@@ -365,22 +386,30 @@ fn on_jump(
 fn update_movement_settings(
     mut query: Query<(
         &Character,
+        &Grounding,
         &mut CharacterMovement,
-        &mut CharacterForces,
+        &mut CharacterDrag,
+        &mut CharacterGravity,
+        &mut CharacterFriction,
         &MovementMode,
     )>,
 ) {
-    for (character, mut movement, mut forces, mode) in &mut query {
-        let (new_movement, new_forces) = mode.settings(character.is_grounded());
+    for (character, grounding, mut movement, mut drag, mut gravity, mut friction, mode) in
+        &mut query
+    {
+        let (new_movement, new_drag, new_gravity, new_friction) =
+            mode.settings(grounding.is_grounded());
         *movement = new_movement;
-        *forces = new_forces;
+        *drag = new_drag;
+        *gravity = new_gravity;
+        *friction = new_friction;
     }
 }
 
-fn remove_ground_when_flying(mut query: Query<(&mut Character, &MovementMode)>) {
-    for (mut character, mode) in &mut query {
+fn remove_ground_when_flying(mut query: Query<(&mut Grounding, &MovementMode)>) {
+    for (mut grounding, mode) in &mut query {
         if let MovementMode::Flying = mode {
-            character.grounding.detach();
+            grounding.detach();
         }
     }
 }

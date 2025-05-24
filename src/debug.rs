@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
 
-use crate::{Character, GroundingSettings, MoveInput, CharacterMovement, move_character};
+use crate::{Character, CharacterMovement, MoveInput, ground::Grounding, move_character};
 
 pub(crate) fn plugin(app: &mut App) {
     app.insert_gizmo_config(
@@ -140,6 +140,7 @@ fn draw_motion(
     mut gizmos: Gizmos<CharacterGizmos>,
     mut query: Query<(
         &Character,
+        Option<&Grounding>,
         &CharacterMovement,
         &Collider,
         &Transform,
@@ -147,7 +148,9 @@ fn draw_motion(
         Has<DebugMode>,
     )>,
 ) {
-    for (character, movement, collider, transform, mut debug_motion, debug_mode) in &mut query {
+    for (character, grounding, movement, collider, transform, mut debug_motion, debug_mode) in
+        &mut query
+    {
         let line_color = |t: f32, velocity: Vec3| {
             let target_speed_sq = movement.target_speed * movement.target_speed;
 
@@ -259,7 +262,7 @@ fn draw_motion(
             debug_motion.clear();
         } else {
             // Only draw last point at character if debug mode is disabled
-            let ground_normal = character.grounding.normal();
+            let ground_normal = grounding.and_then(|g| g.normal());
 
             dbg_point(DebugPoint {
                 translation: transform.translation,

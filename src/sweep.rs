@@ -5,7 +5,11 @@ use bevy::prelude::*;
 
 use crate::{CollisionState, ground::Ground, is_walkable, projection::Surface};
 
-/// Result of the move_and_slide function.
+pub(crate) struct SweepHitData {
+    point: Vec3,
+    normal: Vec3,
+    entity: Entity,
+}
 
 /// Returns the safe hit distance and the hit data from the spatial query.
 #[must_use]
@@ -170,15 +174,15 @@ pub(crate) struct MovementImpact {
     pub hit: ShapeHitData,
 }
 
-pub(crate) struct MovementConfig {
-    pub max_slide_count: u8,
+pub(crate) struct CollideAndSlideConfig {
+    pub max_iterations: u8,
     pub skin_width: f32,
 }
 
-impl Default for MovementConfig {
+impl Default for CollideAndSlideConfig {
     fn default() -> Self {
         Self {
-            max_slide_count: 4,
+            max_iterations: 4,
             skin_width: 0.1,
         }
     }
@@ -191,7 +195,7 @@ pub(crate) fn collide_and_slide(
     rotation: Quat,
     velocity: Vec3,
     current_ground_normal: Option<Dir3>,
-    config: MovementConfig,
+    config: CollideAndSlideConfig,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,
@@ -209,7 +213,7 @@ pub(crate) fn collide_and_slide(
 
     let mut collision_state = CollisionState::default();
 
-    for _ in 0..config.max_slide_count {
+    for _ in 0..config.max_iterations {
         let Ok((direction, max_distance)) =
             Dir3::new_and_length(state.velocity * state.remaining_time)
         else {
