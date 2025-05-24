@@ -188,7 +188,7 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         (
-            InheritedVelocity::default(),
+            Character,
             DebugMotion::default(),
             DebugInput,
             CharacterMovement::DEFAULT_AIR,

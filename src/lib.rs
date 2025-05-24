@@ -35,12 +35,13 @@ impl Plugin for KinematicCharacterPlugin {
             (
                 (
                     make_character_dynamic, //
-                    physics_interactions,
+                    physics_interactions_before_movement,
                 )
                     .before(PhysicsSet::Prepare),
                 (
                     make_character_kinematic,
                     update_platform_velocity,
+                    move_with_platform,
                     move_character,
                 )
                     .after(PhysicsSet::Sync)
@@ -339,12 +340,13 @@ fn make_character_kinematic(
     }
 }
 
-fn physics_interactions(
+/// Push dynamic bodies before movement and physics simulation.
+fn physics_interactions_before_movement(
     spatial_query: SpatialQuery,
-    characters: Query<
+    mut characters: Query<
         (
             &CollideAndSlideConfig,
-            &KinematicVelocity,
+            &mut KinematicVelocity,
             Option<&Grounding>,
             &Transform,
             &Collider,
@@ -367,13 +369,13 @@ fn physics_interactions(
 ) {
     for (
         config,
-        character_velocity,
+        mut character_velocity,
         grounding,
         character_transform,
         character_collider,
         character_mass,
         filter,
-    ) in &characters
+    ) in &mut characters
     {
         let Ok((sweep_direction, target_sweep_distance)) =
             Dir3::new_and_length(character_velocity.0 * time.delta_secs())
@@ -433,6 +435,8 @@ fn physics_interactions(
         if incoming_speed <= 0.0 {
             continue;
         }
+
+        character_velocity.0 -= impulse_direction * incoming_speed * depth;
 
         let current_linear_speed = linear_velocity.dot(*impulse_direction);
 
@@ -545,6 +549,15 @@ pub(crate) fn inherit_platform_velocity(
     velocity.0 += mem::take(&mut platform_velocity.0);
 }
 
+pub(crate) fn move_with_platform(
+    mut query: Query<(&mut Transform, &InheritedVelocity)>,
+    time: Res<Time>,
+) {
+    for (mut transform, inherited_velocity) in &mut query {
+        transform.translation += inherited_velocity.0 * time.delta_secs();
+    }
+}
+
 pub(crate) fn move_character(
     mut commands: Commands,
     spatial_query: SpatialQuery,
@@ -552,7 +565,6 @@ pub(crate) fn move_character(
         Entity,
         &CollideAndSlideConfig,
         &mut KinematicVelocity,
-        Option<&InheritedVelocity>,
         Option<(&mut Grounding, &GroundingConfig)>,
         Option<&SteppingConfig>,
         &mut Transform,
@@ -571,7 +583,6 @@ pub(crate) fn move_character(
         entity,
         config,
         mut velocity,
-        platform_velocity,
         mut grounding,
         stepping_settings,
         mut transform,
@@ -582,10 +593,6 @@ pub(crate) fn move_character(
         debug_mode,
     ) in &mut query
     {
-        if let Some(platform_velocity) = platform_velocity {
-            transform.translation += platform_velocity.0 * time.delta_secs();
-        }
-
         if is_sensor {
             transform.translation += velocity.0 * time.delta_secs();
             continue;
@@ -961,6 +968,7 @@ impl Default for SteppingConfig {
     Collider = Capsule3d::new(0.4, 1.0),
     KinematicVelocity,
     InheritedVelocity,
+    Grounding,
     GroundingConfig,
     CollideAndSlideConfig,
     CollideAndSlideFilter,
@@ -1034,8 +1042,6 @@ impl CharacterDrag {
 }
 
 /// Cache the [`SpatialQueryFilter`] of the character to avoid re-allocating the excluded entities map every time it's used.
-///
-/// This has to be a seperate component because otherwise the `character` cannot be mutated during a `move_and_slide` loop.
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);

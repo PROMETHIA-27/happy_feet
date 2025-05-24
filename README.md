@@ -13,5 +13,6 @@ Work in progress kinematic character controller for the bevy game engine.
   - [ ] fix character drifting on rotating dynamic bodies
 - [ ] interactions with dynamic rigid bodies
   - [x] character can push dynamic bodies
+  - [ ] fix character can't push bodies during collide and slide
   - [ ] dynamic bodies can push character
   - [ ] downward gravity force when standing on bodies
