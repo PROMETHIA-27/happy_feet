@@ -367,7 +367,7 @@ fn physics_interactions(
             continue;
         };
 
-        let Some((sweep_distance, hit)) = sweep(
+        let Some(hit) = sweep(
             character_collider,
             character_transform.translation,
             character_transform.rotation,
@@ -408,9 +408,9 @@ fn physics_interactions(
 
         // We have to limit the impulse applied to bodies so that small bodies don't glitch out of existence
 
-        let depth = 1.0 - sweep_distance / target_sweep_distance;
+        let depth = 1.0 - hit.distance / target_sweep_distance;
 
-        let Ok(impulse_direction) = Dir3::new(-hit.normal1) else {
+        let Ok(impulse_direction) = Dir3::new(-hit.normal) else {
             continue;
         };
 
@@ -433,7 +433,7 @@ fn physics_interactions(
         // Angular push
 
         let center_of_mass = transform.transform_point(center_of_mass.0);
-        let contact_point = hit.point1;
+        let contact_point = hit.point;
         let contact_offset = contact_point - center_of_mass;
 
         let torque = contact_offset.cross(impulse_direction * linear_force);
@@ -634,12 +634,12 @@ pub(crate) fn move_character(
              }| {
                 let surface = match grounding.as_ref() {
                     Some((grounding, grounding_settings)) => Surface::new(
-                        hit.normal1,
+                        hit.normal,
                         walkable_angle(grounding_settings.max_angle, grounding.is_grounded()),
                         character.up,
                     ),
                     None => Surface {
-                        normal: Dir3::new(hit.normal1).unwrap(),
+                        normal: Dir3::new(hit.normal).unwrap(),
                         is_walkable: false,
                     },
                 };
@@ -684,8 +684,8 @@ pub(crate) fn move_character(
                                 &filter.0,
                             ) {
                                 state.velocity =
-                                    align_with_surface(state.velocity, hit.normal1, *character.up);
-                                state.ground = Some(Ground::new(hit.entity, hit.normal1));
+                                    align_with_surface(state.velocity, hit.normal, *character.up);
+                                state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
 
                                 return None;
@@ -709,8 +709,8 @@ pub(crate) fn move_character(
                                 translation: transform.translation + state.offset,
                                 velocity: state.velocity,
                                 hit: Some(DebugHit {
-                                    point: hit.point1,
-                                    normal: hit.normal1,
+                                    point: hit.point,
+                                    normal: hit.normal,
                                     is_walkable: surface.is_walkable,
                                 }),
                             },
@@ -726,7 +726,7 @@ pub(crate) fn move_character(
 
         if let Some((grounding, grounding_settings)) = grounding.as_ref() {
             if grounding.is_grounded() || movement.ground.is_some() {
-                if let Some((ground_distance, ground)) = ground_check(
+                if let Some((ground, hit)) = ground_check(
                     collider,
                     new_translation,
                     transform.rotation,
@@ -741,13 +741,13 @@ pub(crate) fn move_character(
 
                     let mut hit_roof = !grounding_settings.snap_to_surface;
 
-                    if grounding_settings.snap_to_surface && ground_distance < 0.0 {
+                    if grounding_settings.snap_to_surface && hit.distance < 0.0 {
                         hit_roof = sweep(
                             collider,
                             transform.translation,
                             transform.rotation,
                             character.up,
-                            -ground_distance,
+                            -hit.distance,
                             character.skin_width,
                             &spatial_query,
                             &filter.0,
@@ -757,7 +757,7 @@ pub(crate) fn move_character(
                     }
 
                     if !hit_roof {
-                        new_translation -= character.up * ground_distance;
+                        new_translation -= character.up * hit.distance;
                     }
                 } else {
                     movement.ground = None;

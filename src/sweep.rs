@@ -1,14 +1,16 @@
-use std::{f32::consts::PI, mem};
+use std::mem;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{CollisionState, ground::Ground, is_walkable, projection::Surface};
 
+#[derive(Reflect, Debug, Clone, Copy)]
 pub(crate) struct SweepHitData {
-    point: Vec3,
-    normal: Vec3,
-    entity: Entity,
+    pub distance: f32,
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub entity: Entity,
 }
 
 /// Returns the safe hit distance and the hit data from the spatial query.
@@ -23,7 +25,7 @@ pub(crate) fn sweep(
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
     ignore_origin_penetration: bool,
-) -> Option<(f32, ShapeHitData)> {
+) -> Option<SweepHitData> {
     let hit = spatial_query.cast_shape(
         shape,
         origin,
@@ -42,7 +44,12 @@ pub(crate) fn sweep(
     // let distance = hit.distance - skin_width;
     let distance = (hit.distance - skin_width).max(0.0);
 
-    Some((distance, hit))
+    Some(SweepHitData {
+        distance,
+        point: hit.point1,
+        normal: hit.normal1,
+        entity: hit.entity,
+    })
 }
 
 pub(crate) fn step_check(
@@ -59,13 +66,13 @@ pub(crate) fn step_check(
     skin_width: f32,
     spatial_query: &SpatialQuery,
     filter: &SpatialQueryFilter,
-) -> Option<(Vec3, ShapeHitData)> {
+) -> Option<(Vec3, SweepHitData)> {
     if max_height <= 0.0 {
         return None;
     }
 
     // check for roof
-    if let Some((distance, _)) = sweep(
+    if let Some(hit) = sweep(
         shape,
         origin,
         rotation,
@@ -76,13 +83,13 @@ pub(crate) fn step_check(
         filter,
         false,
     ) {
-        max_height = distance;
+        max_height = hit.distance;
     }
 
     let up_offset = up * max_height;
 
     // check for wall
-    if let Some((distance, _)) = sweep(
+    if let Some(hit) = sweep(
         shape,
         origin + up_offset,
         rotation,
@@ -93,13 +100,13 @@ pub(crate) fn step_check(
         filter,
         false,
     ) {
-        max_forward = distance;
+        max_forward = hit.distance;
     }
 
     let forward_offset = direction * motion.min(max_forward);
 
     // check for base step
-    if let Some((distance, hit)) = sweep(
+    if let Some(hit) = sweep(
         shape,
         origin + up_offset + forward_offset,
         rotation,
@@ -110,9 +117,9 @@ pub(crate) fn step_check(
         filter,
         true,
     ) {
-        let is_walkable = is_walkable(hit.normal1, walkable_angle, *up);
+        let is_walkable = is_walkable(hit.normal, walkable_angle, *up);
         if is_walkable {
-            let down_offset = -up * distance;
+            let down_offset = -up * hit.distance;
             return Some((up_offset + forward_offset + down_offset, hit));
         }
     }
@@ -126,7 +133,7 @@ pub(crate) fn step_check(
     for _ in 0..8 {
         let forward_offset = direction * forward;
 
-        if let Some((distance, hit)) = sweep(
+        if let Some(hit) = sweep(
             shape,
             origin + up_offset + forward_offset,
             rotation,
@@ -137,9 +144,9 @@ pub(crate) fn step_check(
             filter,
             true,
         ) {
-            let down_offset = -up * distance;
+            let down_offset = -up * hit.distance;
 
-            let is_walkable = is_walkable(hit.normal1, walkable_angle - 0.01, *up);
+            let is_walkable = is_walkable(hit.normal, walkable_angle - 0.01, *up);
 
             if is_walkable {
                 result = Some((up_offset + forward_offset + down_offset, hit));
@@ -169,9 +176,8 @@ pub(crate) struct MovementImpact {
     pub start: Vec3,
     pub end: Vec3,
     pub direction: Dir3,
-    pub incoming_motion: f32,
     pub remaining_motion: f32,
-    pub hit: ShapeHitData,
+    pub hit: SweepHitData,
 }
 
 pub(crate) struct CollideAndSlideConfig {
@@ -222,7 +228,7 @@ pub(crate) fn collide_and_slide(
 
         let start = origin + state.offset;
 
-        let Some((distance, hit)) = sweep(
+        let Some(hit) = sweep(
             shape,
             start,
             rotation,
@@ -237,15 +243,14 @@ pub(crate) fn collide_and_slide(
             break;
         };
 
-        state.remaining_time *= 1.0 - distance / max_distance;
-        state.offset += direction * distance;
+        state.remaining_time *= 1.0 - hit.distance / max_distance;
+        state.offset += direction * hit.distance;
 
         let impact = MovementImpact {
             start,
             end: origin + state.offset,
             direction,
-            incoming_motion: distance,
-            remaining_motion: max_distance - distance,
+            remaining_motion: max_distance - hit.distance,
             hit,
         };
 
@@ -254,7 +259,7 @@ pub(crate) fn collide_and_slide(
         };
 
         if surface.is_walkable {
-            state.ground = Some(Ground::new(hit.entity, hit.normal1));
+            state.ground = Some(Ground::new(hit.entity, hit.normal));
         }
 
         state.velocity = collision_state.update(
