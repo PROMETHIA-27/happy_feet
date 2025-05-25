@@ -5,7 +5,9 @@ use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, Grounding, GroundingConfig, ground_check, is_walkable};
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
-use sweep::{CollideAndSlideConfig, MovementImpact, collide_and_slide, step_check, sweep};
+use sweep::{
+    CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, step_check, sweep,
+};
 
 pub mod debug;
 pub mod ground;
@@ -16,7 +18,7 @@ pub mod prelude {
     pub use crate::{
         Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
         KinematicCharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter, OnGroundLeave,
-        SteppingBehaviour, SteppingConfig,
+        OnStep, SteppingBehaviour, SteppingConfig,
         ground::{Grounding, GroundingConfig},
         sweep::CollideAndSlideConfig,
     };
@@ -498,10 +500,14 @@ pub struct OnGroundEnter(pub Ground);
 #[derive(Event, Deref)]
 pub struct OnGroundLeave(pub Ground);
 
+/// Triggered when a character stepped over an obstacle.
 #[derive(Event)]
 pub struct OnStep {
-    pub start: Vec3,
-    pub end: Vec3,
+    /// The translation of the character before stepping.
+    pub origin: Vec3,
+    /// The movement of the character during the step.
+    pub offset: Vec3,
+    pub hit: SweepHitData,
 }
 
 pub(crate) fn update_platform_velocity(
@@ -738,6 +744,12 @@ pub(crate) fn move_character(
                                 &spatial_query,
                                 &filter.0,
                             ) {
+                                commands.entity(entity).trigger(OnStep {
+                                    origin: transform.translation + state.offset,
+                                    offset,
+                                    hit,
+                                });
+
                                 state.velocity = align_with_surface(
                                     state.velocity,
                                     hit.normal,

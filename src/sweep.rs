@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Reflect, Debug, Clone, Copy)]
-pub(crate) struct SweepHitData {
+pub struct SweepHitData {
     pub distance: f32,
     pub point: Vec3,
     pub normal: Vec3,
