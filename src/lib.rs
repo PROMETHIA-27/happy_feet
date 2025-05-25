@@ -347,7 +347,7 @@ fn physics_interactions_before_movement(
         (
             &CollideAndSlideConfig,
             &mut KinematicVelocity,
-            Option<&Grounding>,
+            Option<(&mut Grounding, &GroundingConfig)>,
             &Transform,
             &Collider,
             &ComputedMass,
@@ -416,7 +416,11 @@ fn physics_interactions_before_movement(
         }
 
         // Don't push the body the character is standing on
-        if let Some(grounding) = grounding {
+        if let Some((mut grounding, grounding_config)) = grounding {
+            if is_walkable(hit.normal, grounding_config.max_angle, *grounding_config.up) {
+                grounding.inner_ground = Some(Ground::new(hit.entity, hit.normal));
+            }
+
             if grounding.entity() == Some(hit.entity) {
                 continue;
             }
