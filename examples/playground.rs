@@ -9,13 +9,9 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
-    Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
-    InheritedVelocity, KinematicCharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter,
-    OnGroundLeave, SteppingBehaviour, SteppingConfig,
     debug::{DebugInput, DebugMode, DebugMotion},
-    ground::{Grounding, GroundingConfig},
     jump,
-    sweep::CollideAndSlideConfig,
+    prelude::*,
 };
 
 fn main() -> AppExit {

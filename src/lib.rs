@@ -12,6 +12,16 @@ pub mod ground;
 pub(crate) mod projection;
 pub mod sweep;
 
+pub mod prelude {
+    pub use crate::{
+        Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
+        KinematicCharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter, OnGroundLeave,
+        SteppingBehaviour, SteppingConfig,
+        ground::{Grounding, GroundingConfig},
+        sweep::CollideAndSlideConfig,
+    };
+}
+
 pub struct KinematicCharacterPlugin;
 
 impl Plugin for KinematicCharacterPlugin {
@@ -82,31 +92,28 @@ pub(crate) fn update_character_filter(
 }
 
 pub(crate) fn character_gravity(
-    gravity: Res<Gravity>,
     mut query: Query<(
         &mut KinematicVelocity,
+        &CharacterGravity,
         Option<&Grounding>,
-        Option<&CharacterGravity>,
         Option<&GravityScale>,
     )>,
     time: Res<Time>,
 ) {
-    for (mut velocity, grounding, character_gravity, gravity_scale) in &mut query {
+    for (mut velocity, character_gravity, grounding, gravity_scale) in &mut query {
         if grounding.map_or(false, |g| g.is_grounded()) {
             continue;
         }
 
-        let gravity = character_gravity.map(|g| g.0).unwrap_or(gravity.0)
-            * gravity_scale.map(|g| g.0).unwrap_or(1.0);
+        let gravity = character_gravity.0 * gravity_scale.map(|g| g.0).unwrap_or(1.0);
 
         velocity.0 += gravity * time.delta_secs();
     }
 }
 
 pub(crate) fn character_friction(
-    default_friction: Res<DefaultFriction>,
     mut characters: Query<(&mut KinematicVelocity, &Grounding, &CharacterFriction)>,
-    frictions: Query<&Friction>,
+    frictions: Query<&FrictionScale>,
     colliders: Query<&ColliderOf>,
     time: Res<Time>,
 ) {
@@ -115,21 +122,18 @@ pub(crate) fn character_friction(
             continue;
         };
 
-        let mut friction_scale = default_friction.dynamic_coefficient;
+        let mut friction = character_friction.0;
 
-        if let Ok(friction) = frictions.get(ground.entity) {
-            friction_scale = friction.dynamic_coefficient;
+        // Multiply friction by the friction scale
+        if let Ok(s) = frictions.get(ground.entity) {
+            friction *= s.0;
         } else if let Ok(collider_of) = colliders.get(ground.entity) {
-            if let Ok(friction) = frictions.get(collider_of.body) {
-                friction_scale = friction.dynamic_coefficient;
+            if let Ok(s) = frictions.get(collider_of.body) {
+                friction *= s.0;
             }
         }
 
-        let f = friction_factor(
-            velocity.0,
-            character_friction.0 * friction_scale,
-            time.delta_secs(),
-        );
+        let f = friction_factor(velocity.0, friction, time.delta_secs());
 
         velocity.0 *= f;
     }
@@ -882,6 +886,7 @@ pub(crate) fn move_character(
     Ok(())
 }
 
+/// The velocity of the ground a character is standing ong.
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
 pub struct InheritedVelocity(pub Vec3);
@@ -934,6 +939,7 @@ pub(crate) fn inherited_velocity_at_point(
     inherited_velocity
 }
 
+/// The velocity of a character.
 #[derive(Component, Reflect, Debug, Default, Clone, Copy)]
 #[reflect(Component)]
 pub struct KinematicVelocity(pub Vec3);
@@ -946,6 +952,7 @@ pub enum SteppingBehaviour {
     Always,
 }
 
+/// Configure stepping for a character.
 #[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(GroundingConfig)]
@@ -970,12 +977,12 @@ impl Default for SteppingConfig {
 #[require(
     RigidBody = RigidBody::Kinematic,
     Collider = Capsule3d::new(0.4, 1.0),
+    CollideAndSlideConfig,
+    CollideAndSlideFilter,
     KinematicVelocity,
     InheritedVelocity,
     Grounding,
     GroundingConfig,
-    CollideAndSlideConfig,
-    CollideAndSlideFilter,
     MoveInput,
 )]
 pub struct Character;
@@ -1000,6 +1007,7 @@ impl CharacterMovement {
     };
 }
 
+/// The gravity force affecting a character that is not grounded.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
 #[require(KinematicVelocity)]
@@ -1015,6 +1023,13 @@ impl CharacterGravity {
     pub const ZERO: Self = Self(Vec3::ZERO);
 }
 
+/// The friction scale when a character walks on an entity.
+#[derive(Component, Reflect, Default, Debug)]
+#[reflect(Component)]
+pub struct FrictionScale(pub f32);
+
+/// The friction applied to [`KinematicVelocity`] when a character is grounded.
+/// Multiplied by the [`FrictionScale`] of the ground entity.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
 #[require(KinematicVelocity)]
@@ -1030,6 +1045,7 @@ impl CharacterFriction {
     pub const ZERO: Self = Self(0.0);
 }
 
+/// The drag force applied to the [`KinematicVelocity`] of a character.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
 #[require(KinematicVelocity)]
@@ -1050,6 +1066,8 @@ impl CharacterDrag {
 #[reflect(Component)]
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 
+/// The desired movement direction of a character.
+/// The magnitude of the value will be used to scale the acceleration and target speed when [`CharacterMovement`] is used.
 #[derive(Component, Reflect, Default, Debug, Clone, Copy)]
 #[reflect(Component)]
 pub struct MoveInput {
