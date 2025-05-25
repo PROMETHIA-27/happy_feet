@@ -55,6 +55,7 @@ impl Plugin for KinematicCharacterPlugin {
                     update_platform_velocity,
                     move_with_platform,
                     move_character,
+                    // apply_gravity_on_ground,
                 )
                     .after(PhysicsSet::Sync)
                     .chain(),
@@ -369,7 +370,6 @@ fn physics_interactions_before_movement(
         &GlobalTransform,
         &ComputedCenterOfMass,
         &RigidBody,
-        &Collider,
     )>,
     time: Res<Time>,
 ) {
@@ -411,7 +411,6 @@ fn physics_interactions_before_movement(
             transform,
             center_of_mass,
             rb,
-            _,
         )) = bodies.get_mut(hit.entity)
         else {
             continue;
@@ -423,8 +422,20 @@ fn physics_interactions_before_movement(
 
         // Don't push the body the character is standing on
         if let Some((mut grounding, grounding_config)) = grounding {
-            if is_walkable(hit.normal, grounding_config.max_angle, *grounding_config.up) {
-                grounding.inner_ground = Some(Ground::new(hit.entity, hit.normal));
+            let surface = Surface::new(hit.normal, grounding_config.max_angle, grounding_config.up);
+
+            // Project velocity and set ground
+            if surface.is_walkable {
+                character_velocity.0 = surface.project_velocity(
+                    character_velocity.0,
+                    grounding.normal(),
+                    grounding_config.up,
+                );
+
+                grounding.inner_ground = Some(Ground {
+                    entity: hit.entity,
+                    normal: surface.normal,
+                });
             }
 
             if grounding.entity() == Some(hit.entity) {
@@ -669,6 +680,8 @@ pub(crate) fn move_character(
             false => base_angle,
         };
 
+        let mut did_step = false;
+
         let mut movement = collide_and_slide(
             collider,
             transform.translation,
@@ -758,6 +771,8 @@ pub(crate) fn move_character(
                                 state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
 
+                                did_step = true;
+
                                 return None;
                             }
                         }
@@ -809,11 +824,14 @@ pub(crate) fn move_character(
                 ) {
                     movement.ground = Some(ground);
 
-                    movement.velocity = align_with_surface(
-                        movement.velocity,
-                        *ground.normal,
-                        *grounding_settings.up,
-                    );
+                    // Make sure the character is not launched up after stepping.
+                    if did_step {
+                        movement.velocity = align_with_surface(
+                            movement.velocity,
+                            *ground.normal,
+                            *grounding_settings.up,
+                        );
+                    }
 
                     let mut hit_roof = !grounding_settings.snap_to_surface;
 
@@ -1049,7 +1067,7 @@ pub struct CharacterFriction(pub f32);
 
 impl Default for CharacterFriction {
     fn default() -> Self {
-        Self(120.0)
+        Self(60.0)
     }
 }
 
