@@ -40,7 +40,6 @@ fn setup_character(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // character
     let shape = Capsule3d::new(0.2, 1.0);
     commands.spawn((
         Character,
