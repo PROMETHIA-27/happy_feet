@@ -1,7 +1,12 @@
 use std::mem;
 
 use avian3d::prelude::*;
-use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
+use bevy::{
+    color::palettes::css::*,
+    ecs::{intern::Interned, schedule::ScheduleLabel},
+    input::InputSystem,
+    prelude::*,
+};
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, Grounding, GroundingConfig, ground_check, is_walkable};
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
@@ -17,49 +22,82 @@ pub mod sweep;
 pub mod prelude {
     pub use crate::{
         Character, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
-        KinematicCharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter, OnGroundLeave,
-        OnStep, SteppingBehaviour, SteppingConfig,
+        CharacterPlugin, KinematicVelocity, MoveInput, OnGroundEnter, OnGroundLeave, OnStep,
+        SteppingBehaviour, SteppingConfig,
         ground::{Grounding, GroundingConfig},
         sweep::CollideAndSlideConfig,
     };
 }
 
-pub struct KinematicCharacterPlugin;
+#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum CharacterSystems {
+    Prepare,
+    Forces,
+    PhysicsInteractions,
+    ApplyMovement,
+}
 
-impl Plugin for KinematicCharacterPlugin {
+pub struct CharacterPlugin {
+    schedule: Interned<dyn ScheduleLabel>,
+}
+
+impl Default for CharacterPlugin {
+    fn default() -> Self {
+        Self::new(FixedPostUpdate)
+    }
+}
+
+impl CharacterPlugin {
+    pub fn new<S: ScheduleLabel>(schedule: S) -> Self {
+        Self {
+            schedule: schedule.intern(),
+        }
+    }
+}
+
+impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((debug::plugin,));
 
         app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
 
-        app.add_systems(
-            FixedUpdate,
+        app.configure_sets(
+            self.schedule,
             (
-                (character_drag, character_friction, character_gravity),
-                update_character_filter,
+                CharacterSystems::Prepare.before(CharacterSystems::PhysicsInteractions),
+                CharacterSystems::PhysicsInteractions.before(PhysicsSet::Prepare),
+                CharacterSystems::ApplyMovement.after(PhysicsSet::Sync),
+            ),
+        );
+
+        app.add_systems(
+            self.schedule,
+            update_character_filter.in_set(CharacterSystems::Prepare),
+        );
+
+        app.add_systems(
+            self.schedule,
+            (
+                character_drag,
+                character_friction,
+                character_gravity,
                 character_acceleration,
             )
+                // TODO: this should probably have it's own set
+                .in_set(CharacterSystems::Prepare)
                 .chain(),
         );
 
         app.add_systems(
-            FixedPostUpdate,
-            (
-                (
-                    make_character_dynamic, //
-                    physics_interactions_before_movement,
-                )
-                    .before(PhysicsSet::Prepare),
-                (
-                    make_character_kinematic,
-                    update_platform_velocity,
-                    move_with_platform,
-                    move_character,
-                    // apply_gravity_on_ground,
-                )
-                    .after(PhysicsSet::Sync)
-                    .chain(),
-            ),
+            self.schedule,
+            physics_interactions.in_set(CharacterSystems::PhysicsInteractions),
+        );
+
+        app.add_systems(
+            self.schedule,
+            (update_platform_velocity, move_with_platform, move_character)
+                .in_set(CharacterSystems::ApplyMovement)
+                .chain(),
         );
 
         app.add_systems(
@@ -95,9 +133,10 @@ pub(crate) fn update_character_filter(
 }
 
 pub(crate) fn character_gravity(
+    default_gravity: Res<Gravity>,
     mut query: Query<(
         &mut KinematicVelocity,
-        &CharacterGravity,
+        Option<&CharacterGravity>,
         Option<&Grounding>,
         Option<&GravityScale>,
     )>,
@@ -108,7 +147,11 @@ pub(crate) fn character_gravity(
             continue;
         }
 
-        let gravity = character_gravity.0 * gravity_scale.map(|g| g.0).unwrap_or(1.0);
+        let mut gravity = character_gravity.map(|g| g.0).unwrap_or(default_gravity.0);
+
+        if let Some(gravity_scale) = gravity_scale {
+            gravity *= gravity_scale.0;
+        }
 
         velocity.0 += gravity * time.delta_secs();
     }
@@ -194,6 +237,7 @@ pub(crate) fn character_acceleration(
 }
 
 pub(crate) fn depenetrate_character(
+    mut commands: Commands,
     mut overlaps: Local<Vec<(Dir3, f32)>>,
     mut gizmos: Gizmos<CharacterGizmos>,
     collisions: Collisions,
@@ -297,7 +341,13 @@ pub(crate) fn depenetrate_character(
 
             if surface.is_walkable {
                 if let Some((grounding, _)) = grounding.as_mut() {
-                    **grounding = Ground::new(other, hit_normal).into();
+                    let ground = Ground::new(other, hit_normal);
+
+                    if !grounding.is_grounded() {
+                        commands.entity(entity).trigger(OnGroundEnter(ground));
+                    }
+
+                    **grounding = ground.into();
                 }
             }
         }
@@ -348,7 +398,7 @@ fn make_character_kinematic(
 }
 
 /// Push dynamic bodies before movement and physics simulation.
-fn physics_interactions_before_movement(
+fn physics_interactions(
     spatial_query: SpatialQuery,
     mut characters: Query<
         (
@@ -824,15 +874,6 @@ pub(crate) fn move_character(
                 ) {
                     movement.ground = Some(ground);
 
-                    // Make sure the character is not launched up after stepping.
-                    if did_step {
-                        movement.velocity = align_with_surface(
-                            movement.velocity,
-                            *ground.normal,
-                            *grounding_settings.up,
-                        );
-                    }
-
                     let mut hit_roof = !grounding_settings.snap_to_surface;
 
                     if grounding_settings.snap_to_surface && hit.distance < 0.0 {
@@ -856,16 +897,6 @@ pub(crate) fn move_character(
                 } else {
                     movement.ground = None;
                 }
-            }
-
-            match (grounding.inner_ground, movement.ground) {
-                (Some(ground), None) => {
-                    commands.entity(entity).trigger(OnGroundLeave(ground));
-                }
-                (None, Some(ground)) => {
-                    commands.entity(entity).trigger(OnGroundEnter(ground));
-                }
-                _ => {}
             }
         }
 
@@ -905,11 +936,42 @@ pub(crate) fn move_character(
         }
 
         if !debug_mode {
-            transform.translation = new_translation;
-            velocity.0 = movement.velocity;
-            if let Some((grounding, _)) = grounding.as_mut() {
+            if let Some((grounding, grounding_config)) = grounding.as_mut() {
+                match (grounding.inner_ground, movement.ground) {
+                    (Some(ground), None) => {
+                        commands.entity(entity).trigger(OnGroundLeave(ground));
+                    }
+                    (None, Some(ground)) => {
+                        commands.entity(entity).trigger(OnGroundEnter(ground));
+                    }
+                    _ => {}
+                }
+
+                if let Some(ground) = movement.ground {
+                    // Make sure the character is not launched up after stepping.
+                    // FIXME: doesn't really work
+                    if did_step {
+                        movement.velocity = align_with_surface(
+                            movement.velocity,
+                            *ground.normal,
+                            *grounding_config.up,
+                        );
+                    }
+                } else if grounding.is_grounded()
+                    && movement.velocity.dot(*grounding_config.up) < 0.0
+                {
+                    movement.velocity = align_with_surface(
+                        movement.velocity,
+                        *grounding_config.up,
+                        *grounding_config.up,
+                    );
+                }
+
                 **grounding = Grounding::new(movement.ground);
             }
+
+            transform.translation = new_translation;
+            velocity.0 = movement.velocity;
         }
     }
 
@@ -970,7 +1032,7 @@ pub(crate) fn inherited_velocity_at_point(
 }
 
 /// The velocity of a character.
-#[derive(Component, Reflect, Debug, Default, Clone, Copy)]
+#[derive(Component, Reflect, Debug, Default, Clone, Copy, Deref, DerefMut)]
 #[reflect(Component)]
 pub struct KinematicVelocity(pub Vec3);
 
@@ -1013,10 +1075,12 @@ impl Default for SteppingConfig {
     InheritedVelocity,
     Grounding,
     GroundingConfig,
+    CharacterFriction,
     MoveInput,
 )]
 pub struct Character;
 
+/// Used for accelerating a character based on it's [`MoveInput`].
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 #[require(MoveInput, KinematicVelocity)]
@@ -1037,9 +1101,10 @@ impl CharacterMovement {
     };
 }
 
-/// The gravity force affecting a character that is not grounded.
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component)]
+/// The gravity force affecting a character while it's not grounded.
+/// If no gravity is defined then the [`Gravity`] resource will be used instead.
+#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
+#[reflect(Component, Default)]
 #[require(KinematicVelocity)]
 pub struct CharacterGravity(pub Vec3);
 
@@ -1054,13 +1119,13 @@ impl CharacterGravity {
 }
 
 /// The friction scale when a character walks on an entity.
-#[derive(Component, Reflect, Default, Debug)]
+#[derive(Component, Reflect, Default, Debug, Deref, DerefMut)]
 #[reflect(Component)]
 pub struct FrictionScale(pub f32);
 
 /// The friction applied to [`KinematicVelocity`] when a character is grounded.
 /// Multiplied by the [`FrictionScale`] of the ground entity.
-#[derive(Component, Reflect, Debug, Clone)]
+#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
 #[reflect(Component)]
 #[require(KinematicVelocity)]
 pub struct CharacterFriction(pub f32);
@@ -1076,7 +1141,7 @@ impl CharacterFriction {
 }
 
 /// The drag force applied to the [`KinematicVelocity`] of a character.
-#[derive(Component, Reflect, Debug, Clone)]
+#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
 #[reflect(Component)]
 #[require(KinematicVelocity)]
 pub struct CharacterDrag(pub f32);

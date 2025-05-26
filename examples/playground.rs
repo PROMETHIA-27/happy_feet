@@ -21,7 +21,7 @@ fn main() -> AppExit {
             PhysicsPlugins::default(),
             // PhysicsDebugPlugin::default(),
             SkeinPlugin::default(),
-            KinematicCharacterPlugin,
+            CharacterPlugin::default(),
             EnhancedInputPlugin,
         ))
         .insert_resource(AmbientLight {
@@ -171,7 +171,6 @@ fn setup(
         ExternalAngularImpulse::new(Vec3::new(0.0, 10.0, 0.0)).with_persistence(true),
         ExternalForce::new(Vec3::Z * 20.0),
         AngularDamping(10.0),
-        Friction::new(0.1),
     ));
 
     // let shape = Capsule3d::new(0.4, 1.0);
@@ -286,7 +285,7 @@ fn walking_actions() -> Actions<Walking> {
     actions
         .bind::<Jump>()
         .to(KeyCode::Space)
-        .with_conditions(JustPress::default());
+        .with_conditions(Press::default());
 
     actions
         .bind::<Look>()
@@ -296,17 +295,17 @@ fn walking_actions() -> Actions<Walking> {
     actions
         .bind::<ToggleFlyMode>()
         .to(KeyCode::KeyF)
-        .with_conditions(JustPress::default());
+        .with_conditions(Press::default());
 
     actions
         .bind::<TogglePerspective>()
         .to(KeyCode::KeyC)
-        .with_conditions(JustPress::default());
+        .with_conditions(Press::default());
 
     actions
         .bind::<ToggleDebugMode>()
         .to(KeyCode::Tab)
-        .with_conditions(JustPress::default());
+        .with_conditions(Press::default());
 
     actions
 }
@@ -423,7 +422,7 @@ fn move_input(
             camera_transform.align(Dir3::Y, Dir3::Y, Dir3::NEG_Z, camera_transform.forward());
         }
 
-        let axis = actions.action::<Move>().value().as_axis3d();
+        let axis = actions.get::<Move>().unwrap().value().as_axis3d();
 
         input.set(camera_transform.rotation * axis.normalize_or_zero());
     }
@@ -440,7 +439,7 @@ fn look_input(
 
         let actions = characters.get(attached_to.0)?;
 
-        let axis = actions.action::<Look>().value().as_axis2d() / fov;
+        let axis = actions.get::<Look>().unwrap().value().as_axis2d() / fov;
 
         let (mut yaw, mut pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
 

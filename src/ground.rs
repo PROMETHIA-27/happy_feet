@@ -60,14 +60,7 @@ impl Grounding {
         self.inner_ground
     }
 
-    pub fn clear_ground(&mut self) {
-        *self = Self::default();
-    }
-
-    pub fn set_ground(&mut self, ground: Ground) {
-        *self = Self::from(ground);
-    }
-
+    /// Detach from the ground without clearing the [`inner_ground`](Self::inner_ground).
     pub fn detach(&mut self) -> Option<Ground> {
         if !self.is_grounded() {
             return None;
