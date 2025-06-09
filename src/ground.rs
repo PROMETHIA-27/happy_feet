@@ -9,8 +9,6 @@ use crate::sweep::{SweepHitData, sweep};
 #[reflect(Component, Default)]
 #[require(Grounding)]
 pub struct GroundingConfig {
-    /// Mask for walkable ground, not currently used
-    pub layer_mask: Option<LayerMask>,
     /// Max walkable angle
     pub max_angle: f32,
     /// Max distance from the ground
@@ -23,7 +21,6 @@ pub struct GroundingConfig {
 impl Default for GroundingConfig {
     fn default() -> Self {
         Self {
-            layer_mask: None,
             max_angle: PI / 4.0,
             max_distance: 0.2,
             snap_to_surface: true,

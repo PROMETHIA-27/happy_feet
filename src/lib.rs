@@ -90,14 +90,14 @@ impl Plugin for CharacterPlugin {
 
         app.add_systems(
             self.schedule,
-            physics_interactions.in_set(CharacterSystems::PhysicsInteractions),
+            (update_platform_velocity, move_with_platform, move_character)
+                .in_set(CharacterSystems::ApplyMovement)
+                .chain(),
         );
 
         app.add_systems(
             self.schedule,
-            (update_platform_velocity, move_with_platform, move_character)
-                .in_set(CharacterSystems::ApplyMovement)
-                .chain(),
+            physics_interactions.in_set(CharacterSystems::PhysicsInteractions),
         );
 
         app.add_systems(
@@ -709,20 +709,6 @@ pub(crate) fn move_character(
             false => time.delta_secs(),
         };
 
-        if let Some((_, grounding_settings)) = grounding.as_ref() {
-            assert_eq!(
-                None, grounding_settings.layer_mask,
-                "custom layer masks for walkable ground is not supported"
-            );
-        }
-
-        if let Some(stepping_settings) = stepping_settings {
-            assert_eq!(
-                None, stepping_settings.layer_mask,
-                "custom layer masks for steppable surfaces are not supported"
-            );
-        }
-
         // When already grounded, add a small epsilon to make sure we don't randomly
         // loose grip of the surface when the ground angle matches the max angle perfectly
         let walkable_angle = |base_angle, is_grounded| match is_grounded {
@@ -1049,7 +1035,6 @@ pub enum SteppingBehaviour {
 #[reflect(Component, Default)]
 #[require(GroundingConfig)]
 pub struct SteppingConfig {
-    pub layer_mask: Option<LayerMask>,
     pub max_height: f32,
     pub behaviour: SteppingBehaviour,
 }
@@ -1057,7 +1042,6 @@ pub struct SteppingConfig {
 impl Default for SteppingConfig {
     fn default() -> Self {
         Self {
-            layer_mask: None,
             max_height: 0.25,
             behaviour: SteppingBehaviour::Grounded,
         }
@@ -1229,6 +1213,23 @@ fn apply_impulse_on_point(
 }
 
 #[must_use]
+pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
+    f32::exp(-drag * delta)
+}
+
+/// Constant acceleration in the opposite direction of velocity.
+#[must_use]
+pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
+    let speed_sq = velocity.length_squared();
+
+    if speed_sq < 1e-4 {
+        return 0.0;
+    }
+
+    f32::exp(-friction / speed_sq.sqrt() * delta)
+}
+
+#[must_use]
 fn acceleration(
     velocity: Vec3,
     direction: Vec3,
@@ -1248,21 +1249,4 @@ fn acceleration(
     let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
 
     direction * accel_speed
-}
-
-#[must_use]
-pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
-    f32::exp(-drag * delta)
-}
-
-/// Constant acceleration in the opposite direction of velocity.
-#[must_use]
-pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
-    let speed_sq = velocity.length_squared();
-
-    if speed_sq < 1e-4 {
-        return 0.0;
-    }
-
-    f32::exp(-friction / speed_sq.sqrt() * delta)
 }

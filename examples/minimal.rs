@@ -44,6 +44,7 @@ fn setup_character(
     commands.spawn((
         Character,
         CharacterGravity(Vec3::NEG_Y * 20.0),
+        CharacterFriction(40.0),
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -76,7 +77,7 @@ fn character_input(
 
         // jump
         if grounding.is_grounded() && key.just_pressed(KeyCode::Space) {
-            // It's important to detach from the ground since otherwise the character will just instantly snap back after jumping.
+            // It's important to detach from the ground, otherwise the character will just instantly snap back after jumping.
             grounding.detach();
 
             velocity.y = 6.0;
