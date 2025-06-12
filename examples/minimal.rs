@@ -1,5 +1,11 @@
 use avian3d::prelude::*;
-use bevy::{color::palettes::css::*, input::InputSystem, prelude::*};
+use bevy::{
+    color::palettes::css::*,
+    image::{ImageAddressMode, ImageSamplerDescriptor},
+    input::InputSystem,
+    math::Affine2,
+    prelude::*,
+};
 use happy_feet::prelude::*;
 
 const GROUND_MOVEMENT: CharacterMovement = CharacterMovement {
@@ -16,7 +22,13 @@ const AIR_MOVEMENT: CharacterMovement = CharacterMovement {
 fn main() -> AppExit {
     App::new()
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins.set(ImagePlugin {
+                default_sampler: ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    address_mode_v: ImageAddressMode::Repeat,
+                    ..Default::default()
+                },
+            }),
             PhysicsPlugins::default(),
             CharacterPlugin::default(),
         ))
@@ -92,12 +104,14 @@ fn setup_level(
     asset_server: Res<AssetServer>,
 ) {
     // floor
+    let floor_size = 100.0;
     commands.spawn((
         RigidBody::Static,
         Collider::half_space(Vec3::Y),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(100.0)))),
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(floor_size)))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color_texture: Some(asset_server.load("texture_08.png")),
+            uv_transform: Affine2::from_scale(Vec2::splat(floor_size)),
             ..Default::default()
         })),
     ));
