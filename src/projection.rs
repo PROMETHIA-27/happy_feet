@@ -68,7 +68,7 @@ impl Surface {
 /// Represents the current state of collision resolution during movement.
 #[derive(Default, Debug, Clone, Copy)]
 pub(crate) enum CollisionState {
-    /// Initial state before any collision processing.
+    /// Initial state before any collision.
     #[default]
     Initial,
     /// Character has collided with a single plane.
@@ -223,24 +223,6 @@ pub(crate) fn detect_crease(
     }
 
     Some(crease_direction)
-}
-
-/// Calculates the effective obstruction normal for collision response.
-pub(crate) fn calculate_obstruction_normal(
-    surface_normal: Vec3,
-    is_walkable: bool,
-    current_ground_normal: Option<Dir3>,
-    up_direction: Dir3,
-) -> Result<Dir3, InvalidDirectionError> {
-    if !is_walkable {
-        if let Some(ground_normal) = current_ground_normal {
-            // Calculate obstruction normal perpendicular to both ground normal and the up direction
-            let tangent = Dir3::new(ground_normal.cross(surface_normal))?;
-            return Dir3::new(tangent.cross(*up_direction));
-        }
-    }
-
-    Dir3::new(surface_normal)
 }
 
 /// Align the vector with the `normal` plane along the `up` axis.

@@ -4,9 +4,10 @@ use avian3d::prelude::*;
 use bevy::{color::palettes::css::*, prelude::*};
 
 use crate::{
-    Character, CharacterMovement, KinematicVelocity, MoveInput, feet_position,
+    Character, KinematicVelocity, feet_position,
     ground::{Grounding, GroundingConfig},
     move_character,
+    movement::{CharacterMovement, MoveInput},
     sweep::CollideAndSlideConfig,
 };
 
@@ -42,7 +43,7 @@ fn draw_input_arrow(
     query: Query<
         (
             &Transform,
-            &GroundingConfig,
+            &Character,
             &KinematicVelocity,
             &CharacterMovement,
             &Collider,
@@ -51,18 +52,18 @@ fn draw_input_arrow(
         With<DebugInput>,
     >,
 ) {
-    for (transform, grounding_settings, velocity, movement, collider, move_input) in &query {
+    for (transform, character, velocity, movement, collider, move_input) in &query {
         let half_height = collider
             .aabb(Vec3::ZERO, transform.rotation)
             .size()
-            .dot(grounding_settings.up * 0.5);
+            .dot(character.up * 0.5);
 
         if let Ok(direction) = Dir3::new(move_input.previous()) {
             let speed_len = velocity.0.dot(*direction) / movement.target_speed;
             let accel_len = 1.0 - speed_len.clamp(0.0, 1.0);
 
-            let origin = transform.translation - grounding_settings.up * half_height;
-            let right = grounding_settings.up.cross(*direction);
+            let origin = transform.translation - character.up * half_height;
+            let right = character.up.cross(*direction);
 
             let color = BLACK
                 .mix(&VIOLET, accel_len)
@@ -148,7 +149,7 @@ fn draw_motion(
         &CollideAndSlideConfig,
         &KinematicVelocity,
         &Grounding,
-        &GroundingConfig,
+        &Character,
         &CharacterMovement,
         &Collider,
         &Transform,
@@ -160,7 +161,7 @@ fn draw_motion(
         config,
         velocity,
         grounding,
-        grounding_settings,
+        character,
         movement,
         collider,
         transform,
@@ -198,7 +199,7 @@ fn draw_motion(
                     + feet_position(
                         collider,
                         transform.rotation,
-                        grounding_settings.up,
+                        character.up,
                         config.skin_width,
                     ) / 1.5,
                 line_color(
@@ -215,7 +216,7 @@ fn draw_motion(
                     + feet_position(
                         collider,
                         transform.rotation,
-                        grounding_settings.up,
+                        character.up,
                         config.skin_width,
                     ) / 1.5,
                 line_color(1.0, velocity.0),
@@ -258,7 +259,7 @@ fn draw_motion(
                         + feet_position(
                             collider,
                             transform.rotation,
-                            grounding_settings.up,
+                            character.up,
                             config.skin_width,
                         );
 
@@ -266,16 +267,16 @@ fn draw_motion(
 
                     gizmos.line_gradient(
                         point,
-                        point - grounding_settings.up * 0.5,
+                        point - character.up * 0.5,
                         color,
                         color.with_alpha(0.0),
                     );
 
-                    (point, *grounding_settings.up, color)
+                    (point, *character.up, color)
                 }
             };
 
-            let forward = Dir3::new(normal.cross(*grounding_settings.up)).unwrap_or(Dir3::NEG_Z);
+            let forward = Dir3::new(normal.cross(*character.up)).unwrap_or(Dir3::NEG_Z);
 
             let transform = Transform::from_translation(point).looking_to(normal, forward);
 
@@ -306,7 +307,7 @@ fn draw_motion(
                         + feet_position(
                             collider,
                             transform.rotation,
-                            grounding_settings.up,
+                            character.up,
                             config.skin_width,
                         ),
                     normal: *normal,

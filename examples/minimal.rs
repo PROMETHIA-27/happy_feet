@@ -42,7 +42,7 @@ fn setup_character(
 ) {
     let shape = Capsule3d::new(0.2, 1.0);
     commands.spawn((
-        Character,
+        Character::default(),
         CharacterGravity(Vec3::NEG_Y * 20.0),
         CharacterFriction(40.0),
         Collider::from(shape),

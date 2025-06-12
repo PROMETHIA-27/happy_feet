@@ -10,7 +10,7 @@ use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
     debug::{DebugInput, DebugMode, DebugMotion},
-    jump,
+    movement::jump,
     prelude::*,
 };
 
@@ -183,7 +183,7 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         (
-            Character,
+            Character::default(),
             DebugMotion::default(),
             DebugInput,
             CharacterMovement::DEFAULT_AIR,
@@ -371,14 +371,13 @@ fn on_jump(
     mut query: Query<(
         &mut KinematicVelocity,
         &mut Grounding,
-        &GroundingConfig,
+        &Character,
         &MovementMode,
     )>,
 ) -> Result {
-    let (mut velocity, mut grounding, grounding_settings, mode) =
-        query.get_mut(trigger.target())?;
+    let (mut velocity, mut grounding, character, mode) = query.get_mut(trigger.target())?;
     if let MovementMode::Walking = mode {
-        jump(7.0, &mut velocity, &mut grounding, grounding_settings.up);
+        jump(7.0, &mut velocity, &mut grounding, character.up);
     }
     Ok(())
 }
@@ -456,13 +455,13 @@ fn look_input(
 }
 
 fn update_camera_offset(
-    characters: Query<&GroundingConfig>,
+    characters: Query<&Character>,
     mut cameras: Query<(&mut Transform, &PlayerCamera, &AttachedTo)>,
 ) -> Result {
     for (mut camera_transform, player_camera, attached_to) in &mut cameras {
-        let grounding_settings = characters.get(attached_to.0)?;
+        let character = characters.get(attached_to.0)?;
 
-        let mut offset = grounding_settings.up * player_camera.eye_height;
+        let mut offset = character.up * player_camera.eye_height;
         offset += camera_transform.rotation * Vec3::Z * player_camera.distance;
 
         camera_transform.translation += offset;

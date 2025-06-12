@@ -14,8 +14,6 @@ pub struct GroundingConfig {
     /// Max distance from the ground
     pub max_distance: f32,
     pub snap_to_surface: bool,
-    /// The up direction.
-    pub up: Dir3,
 }
 
 impl Default for GroundingConfig {
@@ -24,7 +22,6 @@ impl Default for GroundingConfig {
             max_angle: PI / 4.0,
             max_distance: 0.2,
             snap_to_surface: true,
-            up: Dir3::Y,
         }
     }
 }
