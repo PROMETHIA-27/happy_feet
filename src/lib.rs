@@ -400,9 +400,7 @@ pub(crate) fn move_character(
             &spatial_query,
             duration,
             |velocity, surface| match grounding {
-                Some((_, grounding_settings)) => {
-                    surface.project_velocity(velocity, current_ground_normal, character.up)
-                }
+                Some(_) => surface.project_velocity(velocity, current_ground_normal, character.up),
                 None => velocity.reject_from(*surface.normal),
             },
             |state,
