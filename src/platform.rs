@@ -56,7 +56,10 @@ pub(crate) fn update_platform_velocity(
             continue;
         };
 
-        let platform = platform_colliders.get(platform_collider.entity)?.body;
+        let platform = platform_colliders
+            .get(platform_collider.entity)
+            .map(|it| it.body)
+            .unwrap_or(platform_collider.entity);
 
         let (
             platform_linear_velocity,
