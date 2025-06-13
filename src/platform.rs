@@ -41,33 +41,37 @@ pub(crate) fn update_platform_velocity(
         &mut InheritedVelocity,
         &Transform,
     )>,
+    platform_colliders: Query<&ColliderOf>,
     platforms: Query<(
-        &LinearVelocity,
-        &AngularVelocity,
+        Option<&LinearVelocity>,
+        Option<&AngularVelocity>,
+        Option<&ComputedCenterOfMass>,
         &GlobalTransform,
-        &ComputedCenterOfMass,
     )>,
     time: Res<Time>,
 ) -> Result {
     for (velocity, grounding, mut velocity_on_platform, transform) in &mut characters {
-        let Some(platform) = grounding.inner_ground else {
+        let Some(platform_collider) = grounding.inner_ground else {
             *velocity_on_platform = InheritedVelocity::default();
             continue;
         };
 
+        let platform = platform_colliders.get(platform_collider.entity)?.body;
+
         let (
             platform_linear_velocity,
             platform_angular_velocity,
-            platform_transform,
             platform_center_of_mass,
-        ) = platforms.get(platform.entity)?;
+            platform_transform,
+        ) = platforms.get(platform)?;
 
-        let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
+        let platform_position = platform_transform
+            .transform_point(platform_center_of_mass.map(|it| it.0).unwrap_or_default());
 
         *velocity_on_platform = InheritedVelocity::at_point(
             platform_position,
-            platform_linear_velocity.0,
-            platform_angular_velocity.0,
+            platform_linear_velocity.map(|it| it.0).unwrap_or_default(),
+            platform_angular_velocity.map(|it| it.0).unwrap_or_default(),
             transform.translation,
             velocity.0,
             time.delta_secs(),
