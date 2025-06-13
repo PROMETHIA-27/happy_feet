@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::{KinematicVelocity, OnGroundLeave, ground::Grounding};
 
-/// A kinematic rigidbody that is moved using `Transform::translation`.
+/// A kinematic rigidbody that is moved and rotated using `Transform`.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
 #[require(RigidBody = RigidBody::Kinematic)]
@@ -14,8 +14,7 @@ pub struct PhysicsMover;
 pub(crate) fn update_physics_mover(
     mut query: Query<
         (
-            // &mut PreviousTransform,
-            &mut PreviousGlobalTransform,
+            &PreviousGlobalTransform,
             &mut Transform,
             &mut LinearVelocity,
             &mut AngularVelocity,
@@ -23,12 +22,15 @@ pub(crate) fn update_physics_mover(
         With<PhysicsMover>,
     >,
 ) {
-    for (mut prev_trans, mut transform, mut linear_vel, mut angular_vel) in &mut query {
-        let delta_pos = transform.translation - prev_trans.translation();
-        transform.translation = prev_trans.translation();
-        linear_vel.0 = delta_pos;
+    for (prev_transform, mut transform, mut linear_vel, mut angular_vel) in &mut query {
+        let prev_transform = prev_transform.compute_transform();
 
-        // TODO: angular velocity
+        linear_vel.0 = transform.translation - prev_transform.translation;
+        angular_vel.0 =
+            transform.rotation.to_scaled_axis() - prev_transform.rotation.to_scaled_axis();
+
+        transform.translation = prev_transform.translation;
+        transform.rotation = prev_transform.rotation;
     }
 }
 
