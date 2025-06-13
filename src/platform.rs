@@ -42,34 +42,41 @@ pub(crate) fn update_platform_velocity(
         &Transform,
     )>,
     colliders: Query<&ColliderOf>,
-    rigidbodies: Query<(&LinearVelocity, &AngularVelocity, &ComputedCenterOfMass)>,
-    transforms: Query<&GlobalTransform>,
+    rigidbodies: Query<(
+        &LinearVelocity,
+        &AngularVelocity,
+        &ComputedCenterOfMass,
+        &GlobalTransform,
+    )>,
     time: Res<Time>,
 ) -> Result {
-    for (velocity, grounding, mut velocity_on_platform, transform) in &mut characters {
+    for (velocity, grounding, mut inherited_velocity, transform) in &mut characters {
         let Some(collider) = grounding.inner_ground else {
-            *velocity_on_platform = InheritedVelocity::default();
+            inherited_velocity.0 = Vec3::ZERO;
             continue;
         };
 
         let rigidbody = colliders
             .get(collider.entity)
-            .map(|it| it.body)
-            .unwrap_or(collider.entity);
+            .map_or(collider.entity, |it| it.body);
 
-        let (platform_linear_velocity, platform_angular_velocity, platform_center_of_mass) =
-            match rigidbodies.get(rigidbody) {
-                Ok((linvel, angvel, com)) => (linvel.0, angvel.0, com.0),
-                Err(_) => (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO),
-            };
-        let platform_transform = transforms.get(rigidbody)?;
-
-        let platform_position = platform_transform.transform_point(platform_center_of_mass);
-
-        *velocity_on_platform = InheritedVelocity::at_point(
-            platform_position,
+        let Ok((
             platform_linear_velocity,
             platform_angular_velocity,
+            platform_center_of_mass,
+            platform_transform,
+        )) = rigidbodies.get(rigidbody)
+        else {
+            inherited_velocity.0 = Vec3::ZERO;
+            continue;
+        };
+
+        let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
+
+        *inherited_velocity = InheritedVelocity::at_point(
+            platform_position,
+            platform_linear_velocity.0,
+            platform_angular_velocity.0,
             transform.translation,
             velocity.0,
             time.delta_secs(),
