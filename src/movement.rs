@@ -160,6 +160,7 @@ impl Default for CharacterGravity {
 
 impl CharacterGravity {
     pub const ZERO: Self = Self(Vec3::ZERO);
+    pub const EARTH: Self = Self(Vec3::new(0.0, -9.81, 0.0));
 }
 
 /// The friction scale when a character walks on an entity.
