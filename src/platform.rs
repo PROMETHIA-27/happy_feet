@@ -41,33 +41,35 @@ pub(crate) fn update_platform_velocity(
         &mut InheritedVelocity,
         &Transform,
     )>,
-    platforms: Query<(
-        &LinearVelocity,
-        &AngularVelocity,
-        &GlobalTransform,
-        &ComputedCenterOfMass,
-    )>,
+    colliders: Query<&ColliderOf>,
+    rigidbodies: Query<(&LinearVelocity, &AngularVelocity, &ComputedCenterOfMass)>,
+    transforms: Query<&GlobalTransform>,
     time: Res<Time>,
 ) -> Result {
     for (velocity, grounding, mut velocity_on_platform, transform) in &mut characters {
-        let Some(platform) = grounding.inner_ground else {
+        let Some(collider) = grounding.inner_ground else {
             *velocity_on_platform = InheritedVelocity::default();
             continue;
         };
 
-        let (
-            platform_linear_velocity,
-            platform_angular_velocity,
-            platform_transform,
-            platform_center_of_mass,
-        ) = platforms.get(platform.entity)?;
+        let rigidbody = colliders
+            .get(collider.entity)
+            .map(|it| it.body)
+            .unwrap_or(collider.entity);
 
-        let platform_position = platform_transform.transform_point(platform_center_of_mass.0);
+        let (platform_linear_velocity, platform_angular_velocity, platform_center_of_mass) =
+            match rigidbodies.get(rigidbody) {
+                Ok((linvel, angvel, com)) => (linvel.0, angvel.0, com.0),
+                Err(_) => (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO),
+            };
+        let platform_transform = transforms.get(rigidbody)?;
+
+        let platform_position = platform_transform.transform_point(platform_center_of_mass);
 
         *velocity_on_platform = InheritedVelocity::at_point(
             platform_position,
-            platform_linear_velocity.0,
-            platform_angular_velocity.0,
+            platform_linear_velocity,
+            platform_angular_velocity,
             transform.translation,
             velocity.0,
             time.delta_secs(),

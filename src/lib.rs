@@ -12,6 +12,7 @@ use sweep::{
     CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, step_check, sweep,
 };
 
+use crate::prelude::{CharacterDrag, CharacterGravity, CharacterMovement, PhysicsMover};
 use crate::{
     interactions::physics_interactions,
     movement::{
@@ -75,6 +76,16 @@ impl CharacterPlugin {
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((debug::plugin,));
+
+        app.register_type::<PhysicsMover>()
+            .register_type::<Character>()
+            .register_type::<CharacterMovement>()
+            .register_type::<CharacterFriction>()
+            .register_type::<CharacterGravity>()
+            .register_type::<CharacterDrag>()
+            .register_type::<SteppingConfig>()
+            .register_type::<Grounding>()
+            .register_type::<GroundingConfig>();
 
         app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
 
