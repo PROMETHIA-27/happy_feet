@@ -5,8 +5,10 @@ use bevy::prelude::*;
 
 use crate::{KinematicVelocity, OnGroundLeave, ground::Grounding};
 
+/// A kinematic rigidbody that is moved using `Transform::translation`.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component)]
+#[require(RigidBody = RigidBody::Kinematic)]
 pub struct PhysicsMover;
 
 pub(crate) fn update_physics_mover(
