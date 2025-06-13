@@ -55,6 +55,7 @@ fn main() -> AppExit {
             )
                 .chain(),
         )
+        .add_systems(FixedUpdate, move_physics_mover)
         .run()
 }
 
@@ -173,6 +174,18 @@ fn setup(
         AngularDamping(10.0),
     ));
 
+    commands.spawn((
+        PhysicsMover,
+        RigidBody::Kinematic,
+        Transform::from_xyz(-20.0, 1.0, 0.0),
+        Collider::from(cube),
+        Mesh3d(meshes.add(cube)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: MIDNIGHT_BLUE.into(),
+            ..Default::default()
+        })),
+    ));
+
     // let shape = Capsule3d::new(0.4, 1.0);
     // let shape = Cuboid::from_length(0.4);
     // let shape = Cone::new(0.4, 1.4);
@@ -239,6 +252,12 @@ fn setup(
     commands.spawn(SceneRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("playground.gltf")),
     ));
+}
+
+fn move_physics_mover(mut query: Query<&mut Transform, With<PhysicsMover>>, time: Res<Time>) {
+    for mut transform in &mut query {
+        transform.translation.z = time.elapsed_secs().sin() * 10.0;
+    }
 }
 
 #[derive(InputContext)]

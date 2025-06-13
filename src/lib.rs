@@ -1,4 +1,4 @@
-use avian3d::prelude::*;
+use avian3d::{prelude::*, sync::update_previous_global_transforms};
 use bevy::{
     color::palettes::css::*,
     ecs::{intern::Interned, schedule::ScheduleLabel},
@@ -19,7 +19,8 @@ use crate::{
         clear_movement_input, feet_position,
     },
     platform::{
-        InheritedVelocity, inherit_platform_velocity, move_with_platform, update_platform_velocity,
+        InheritedVelocity, inherit_platform_velocity, move_with_platform, update_physics_mover,
+        update_platform_velocity,
     },
     prelude::{CharacterFriction, MoveInput},
 };
@@ -28,7 +29,7 @@ pub mod debug;
 pub mod ground;
 pub(crate) mod interactions;
 pub mod movement;
-pub(crate) mod platform;
+pub mod platform;
 pub(crate) mod projection;
 pub mod sweep;
 
@@ -40,6 +41,7 @@ pub mod prelude {
         movement::{
             CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement, MoveInput,
         },
+        platform::PhysicsMover,
         sweep::CollideAndSlideConfig,
     };
 }
@@ -113,6 +115,11 @@ impl Plugin for CharacterPlugin {
         app.add_systems(
             self.schedule,
             physics_interactions.in_set(CharacterSystems::PhysicsInteractions),
+        );
+
+        app.add_systems(
+            self.schedule,
+            update_physics_mover.in_set(PhysicsSet::Prepare),
         );
 
         app.add_systems(

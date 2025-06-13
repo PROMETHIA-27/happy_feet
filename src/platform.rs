@@ -1,9 +1,34 @@
 use std::mem;
 
-use avian3d::prelude::*;
+use avian3d::{prelude::*, sync::PreviousGlobalTransform};
 use bevy::prelude::*;
 
 use crate::{KinematicVelocity, OnGroundLeave, ground::Grounding};
+
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component)]
+pub struct PhysicsMover;
+
+pub(crate) fn update_physics_mover(
+    mut query: Query<
+        (
+            // &mut PreviousTransform,
+            &mut PreviousGlobalTransform,
+            &mut Transform,
+            &mut LinearVelocity,
+            &mut AngularVelocity,
+        ),
+        With<PhysicsMover>,
+    >,
+) {
+    for (mut prev_trans, mut transform, mut linear_vel, mut angular_vel) in &mut query {
+        let delta_pos = transform.translation - prev_trans.translation();
+        transform.translation = prev_trans.translation();
+        linear_vel.0 = delta_pos;
+
+        // TODO: angular velocity
+    }
+}
 
 pub(crate) fn update_platform_velocity(
     mut characters: Query<(
