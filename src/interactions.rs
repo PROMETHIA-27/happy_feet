@@ -121,42 +121,67 @@ pub(crate) fn physics_interactions(
 
         character_velocity.0 -= impulse_direction * incoming_speed * depth;
 
-        let current_linear_speed = linear_velocity.dot(*impulse_direction);
+        apply_acceleration_on_point(
+            *impulse_direction,
+            incoming_speed * depth * character_mass.value(),
+            incoming_speed,
+            hit.point,
+            &mut linear_velocity,
+            &mut angular_velocity,
+            mass.inverse(),
+            inertia.inverse(),
+            transform.transform_point(center_of_mass.0),
+            time.delta_secs(),
+        );
+    }
+}
 
-        let linear_force = incoming_speed * depth * character_mass.value() * time.delta_secs();
-        let linear_acceleration = f32::min(
-            incoming_speed - current_linear_speed,
-            linear_force * mass.inverse(),
+fn apply_acceleration_on_point(
+    direction: Vec3,
+    max_acceleration: f32,
+    target_speed: f32,
+    point: Vec3,
+    linear_velocity: &mut Vec3,
+    angular_velocity: &mut Vec3,
+    inverse_mass: f32,
+    inverse_inertia: Mat3,
+    center_of_mass: Vec3,
+    delta: f32,
+) {
+    // Linear push
+
+    let linear_speed = linear_velocity.dot(direction);
+
+    if linear_speed < target_speed {
+        // Clamp to avoid acceleration past the target speed.
+        let linear_accel = f32::min(
+            target_speed - linear_speed,
+            max_acceleration * delta * inverse_mass,
         );
 
-        linear_velocity.0 += impulse_direction * linear_acceleration;
+        *linear_velocity += direction * linear_accel;
+    }
 
-        // Angular push
+    // Angular push
 
-        let center_of_mass = transform.transform_point(center_of_mass.0);
-        let contact_point = hit.point;
-        let contact_offset = contact_point - center_of_mass;
+    let contact_offset = point - center_of_mass;
 
-        let torque = contact_offset.cross(impulse_direction * linear_force);
+    let torque = contact_offset.cross(direction * max_acceleration * delta);
 
-        // Get current angular velocity in the torque direction
-        let Ok(torque_axis) = Dir3::new(torque) else {
-            continue;
-        };
-        let current_angular_speed = angular_velocity.0.dot(*torque_axis);
+    let Ok(torque_axis) = Dir3::new(torque) else {
+        return;
+    };
 
-        const MAX_TORQUE: f32 = 100.0;
+    // Get current angular velocity in the torque direction
+    let angular_speed = angular_velocity.dot(*torque_axis);
 
-        let angular_acceleration = f32::min(
-            f32::max(0.0, incoming_speed - current_angular_speed),
-            f32::min(
-                MAX_TORQUE * time.delta_secs(),
-                (inertia.inverse() * torque).length(),
-            ),
+    if angular_speed < target_speed {
+        let angular_accel = f32::min(
+            target_speed - angular_speed,
+            (inverse_inertia * torque).length(),
         );
 
-        // Apply limited angular change
-        angular_velocity.0 += torque_axis * angular_acceleration;
+        *angular_velocity += torque_axis * angular_accel;
     }
 }
 
