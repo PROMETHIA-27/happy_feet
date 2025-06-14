@@ -4,11 +4,9 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
-    Character, CollideAndSlideFilter, KinematicVelocity, align_with_surface,
+    Character, KinematicVelocity, align_with_surface,
     debug::DebugMode,
     ground::{Grounding, GroundingConfig},
-    platform::InheritedVelocity,
-    sweep::CollideAndSlideConfig,
 };
 
 pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
@@ -32,7 +30,7 @@ pub(crate) fn character_gravity(
             continue;
         }
 
-        let mut gravity = character_gravity.map(|g| g.0).unwrap_or(default_gravity.0);
+        let mut gravity = character_gravity.map_or(default_gravity.0, |g| g.0);
 
         if let Some(gravity_scale) = gravity_scale {
             gravity *= gravity_scale.0;
