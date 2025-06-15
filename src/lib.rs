@@ -149,7 +149,7 @@ pub(crate) fn update_character_filter(
     sensors: Query<Entity, With<Sensor>>,
 ) {
     for (entity, mut filter, collidion_layers) in &mut query {
-        // Filter out any entities that's not in the character's collision filter
+        // Filter out any entity not in the character's collision filter
         filter.0.mask = collidion_layers.filters;
 
         // Filter out all sensor entities along with the character entity
@@ -401,7 +401,7 @@ pub(crate) fn move_character(
         };
 
         // When already grounded, add a small epsilon to make sure we don't randomly
-        // loose grip of the surface when the ground angle matches the max angle perfectly
+        // lose grip of the surface when the ground angle matches the max angle perfectly
         let walkable_angle = |base_angle, is_grounded| match is_grounded {
             true => base_angle + 0.01,
             false => base_angle,
@@ -501,7 +501,7 @@ pub(crate) fn move_character(
                 // Trigger collision events
                 collision_started_events.write(CollisionStarted(entity, hit.entity));
 
-                // For now, assume the collision is ended instantly which is probably the case with move and slide anyway
+                // For now, assume the collision is ended immediately, which is probably the case with move and slide anyway
                 collision_ended_events.write(CollisionEnded(entity, hit.entity));
 
                 if debug_mode {

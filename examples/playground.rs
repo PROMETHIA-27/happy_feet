@@ -476,7 +476,7 @@ fn look_input(
 
         let actions = characters.get(attached_to.0)?;
 
-        let axis = actions.get::<Look>().unwrap().value().as_axis2d() / fov;
+        let axis = actions.get::<Look>()?.value().as_axis2d() / fov;
 
         let (mut yaw, mut pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
 

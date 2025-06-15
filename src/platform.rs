@@ -107,7 +107,7 @@ pub(crate) fn move_with_platform(
     }
 }
 
-/// The velocity of the ground a character is standing ong.
+/// The velocity of the ground a character is standing on.
 #[derive(Component, Reflect, Default, Debug)]
 #[reflect(Component)]
 pub struct InheritedVelocity(pub Vec3);
@@ -121,7 +121,7 @@ impl InheritedVelocity {
         relative_velocity: Vec3,
         delta: f32,
     ) -> Self {
-        // Calculate an initial estimate of platform velocity at current position
+        // Calculate an initial estimate of platform velocity at the current position
         let initial_velocity =
             inherited_velocity_at_point(translation, linear_velocity, angular_velocity, point);
 

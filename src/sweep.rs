@@ -35,7 +35,7 @@ pub(crate) fn sweep(
         direction,
         &ShapeCastConfig {
             max_distance: max_distance + skin_width, // extend the trace slightly
-            target_distance: skin_width, // I'm not sure what this does but I think this is correct ;)
+            target_distance: skin_width, // I'm not sure what this does, but I think this is correct ;)
             ignore_origin_penetration,
             ..Default::default()
         },

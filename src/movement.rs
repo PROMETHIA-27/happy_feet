@@ -131,7 +131,7 @@ pub(crate) fn character_acceleration(
     }
 }
 
-/// Used for accelerating a character based on it's [`MoveInput`].
+/// Used for moving a character based on it's [`MoveInput`].
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 #[require(MoveInput, KinematicVelocity)]
@@ -153,7 +153,7 @@ impl CharacterMovement {
 }
 
 /// The gravity force affecting a character while it's not grounded.
-/// If no gravity is defined then the [`Gravity`] resource will be used instead.
+/// If no gravity is defined, then the [`Gravity`] resource will be used instead.
 #[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
 #[reflect(Component, Default)]
 #[require(KinematicVelocity)]
@@ -209,7 +209,7 @@ impl CharacterDrag {
 }
 
 /// The desired movement direction of a character.
-/// The magnitude of the value will be used to scale the acceleration and target speed when [`CharacterMovement`] is used.
+/// The length of the value will be used to scale the acceleration and target speed when [`CharacterMovement`] is used.
 #[derive(Component, Reflect, Default, Debug, Clone, Copy)]
 #[reflect(Component)]
 pub struct MoveInput {
@@ -347,7 +347,7 @@ pub fn acceleration_with_brake(
     let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
     let mut accel = accel_speed * direction;
 
-    // No braking or clamping is needed if velocity is almost zero.
+    // No braking or clamping is needed if the velocity is almost zero.
     if velocity.length_squared() < 1e-6 {
         return accel;
     }
@@ -369,7 +369,7 @@ pub fn acceleration_with_brake(
 
     let new_vel = velocity + accel;
 
-    // No clamping is needed if the new speed does not exceed target speed.
+    // No clamping is needed if the new speed does not exceed the target speed.
     if new_vel.length_squared() <= target_speed * target_speed {
         return accel;
     }
@@ -381,7 +381,7 @@ pub fn acceleration_with_brake(
     let par_speed = accel.dot(vel_dir);
     let perp_accel = accel - par_speed * vel_dir;
 
-    // Clamp parallel acceleration to stay under target speed.
+    // Clamp parallel acceleration to stay under the target speed.
     let max_par_speed = f32::max(0.0, target_speed - speed);
     let par_accel = f32::min(max_par_speed, par_speed) * vel_dir;
 

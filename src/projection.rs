@@ -147,7 +147,7 @@ pub(crate) fn project_velocity(
     match (current_ground_normal, is_walkable) {
         // Character on ground, moving to walkable surface
         (Some(_), true) => {
-            // Align the velocity to the surface while maintaining horizontal direction
+            // Align the velocity to the surface while maintaining the horizontal direction
             align_with_surface(velocity, obstruction_normal, *up_direction)
         }
         // Character on ground, moving to non-walkable surface
@@ -163,7 +163,7 @@ pub(crate) fn project_velocity(
         }
         // Character in air, hitting walkable surface
         (None, true) => {
-            // Remove vertical component and align with surface
+            // Remove the vertical component and align with the surface
             let velocity = velocity.reject_from(*up_direction);
             align_with_surface(velocity, obstruction_normal, *up_direction)
         }
