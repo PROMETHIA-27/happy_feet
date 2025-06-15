@@ -217,10 +217,10 @@ fn setup(
             CharacterFriction::default(),
             CharacterDrag::default(),
             SteppingConfig {
-                max_height: 0.4,
-                behaviour: SteppingBehaviour::Always,
+                max_step_up: 0.4,
                 ..Default::default()
             },
+            SteppingBehaviour::Always,
             GroundingConfig {
                 max_angle: PI / 4.0 + 0.1,
                 max_distance: 0.2,
@@ -267,12 +267,14 @@ fn setup(
     ));
 }
 
-
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 struct AnimatedPlatform;
 
-fn move_animated_platform(mut query: Query<&mut Transform, With<AnimatedPlatform>>, time: Res<Time>) {
+fn move_animated_platform(
+    mut query: Query<&mut Transform, With<AnimatedPlatform>>,
+    time: Res<Time>,
+) {
     for mut transform in &mut query {
         transform.translation.z = time.elapsed_secs().sin() * 10.0;
     }
@@ -288,6 +290,10 @@ struct Move;
 #[derive(InputAction, Debug)]
 #[input_action(output = bool)]
 struct Jump;
+
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct Sneak;
 
 #[derive(InputAction, Debug)]
 #[input_action(output = Vec2)]
@@ -323,6 +329,8 @@ fn walking_actions() -> Actions<Walking> {
         .bind::<Jump>()
         .to(KeyCode::Space)
         .with_conditions(Press::default());
+
+    actions.bind::<Sneak>().to(KeyCode::ShiftLeft);
 
     actions
         .bind::<Look>()
@@ -461,6 +469,10 @@ fn move_input(
         let axis = actions.get::<Move>().unwrap().value().as_axis3d();
 
         input.set(camera_transform.rotation * axis.normalize_or_zero());
+
+        if actions.get::<Sneak>().unwrap().value().as_bool() {
+            input.value *= 0.33;
+        }
     }
 }
 

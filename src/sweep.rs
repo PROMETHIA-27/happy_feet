@@ -4,7 +4,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
-    CollideAndSlideFilter, CollisionState, ground::Ground, is_walkable, projection::Surface,
+    CollideAndSlideFilter, CollisionState, ground::Ground, projection::Surface,
 };
 
 #[derive(Reflect, Debug, Clone, Copy)]
@@ -54,117 +54,6 @@ pub(crate) fn sweep(
     })
 }
 
-pub(crate) fn step_check(
-    shape: &Collider,
-    origin: Vec3,
-    rotation: Quat,
-    direction: Dir3,
-    motion: f32,
-    up: Dir3,
-    walkable_angle: f32,
-    mut max_forward: f32,
-    min_height: f32,
-    mut max_height: f32,
-    skin_width: f32,
-    spatial_query: &SpatialQuery,
-    filter: &SpatialQueryFilter,
-) -> Option<(Vec3, SweepHitData)> {
-    if max_height <= 0.0 {
-        return None;
-    }
-
-    // check for roof
-    if let Some(hit) = sweep(
-        shape,
-        origin,
-        rotation,
-        up,
-        max_height,
-        skin_width,
-        spatial_query,
-        filter,
-        false,
-    ) {
-        max_height = hit.distance;
-    }
-
-    let up_offset = up * max_height;
-
-    // check for wall
-    if let Some(hit) = sweep(
-        shape,
-        origin + up_offset,
-        rotation,
-        direction,
-        max_forward,
-        skin_width,
-        spatial_query,
-        filter,
-        false,
-    ) {
-        max_forward = hit.distance;
-    }
-
-    let forward_offset = direction * motion.min(max_forward);
-
-    // check for base step
-    if let Some(hit) = sweep(
-        shape,
-        origin + up_offset + forward_offset,
-        rotation,
-        -up,
-        max_height - min_height,
-        skin_width,
-        spatial_query,
-        filter,
-        true,
-    ) {
-        let is_walkable = is_walkable(hit.normal, walkable_angle, *up);
-        if is_walkable {
-            let down_offset = -up * hit.distance;
-            return Some((up_offset + forward_offset + down_offset, hit));
-        }
-    }
-
-    // loop check for floor
-    let mut forward = 0.0;
-    let mut least_forward = 0.0;
-
-    let mut result = None;
-
-    for _ in 0..8 {
-        let forward_offset = direction * forward;
-
-        if let Some(hit) = sweep(
-            shape,
-            origin + up_offset + forward_offset,
-            rotation,
-            -up,
-            max_height - min_height,
-            skin_width,
-            spatial_query,
-            filter,
-            true,
-        ) {
-            let down_offset = -up * hit.distance;
-
-            let is_walkable = is_walkable(hit.normal, walkable_angle - 0.01, *up);
-
-            if is_walkable {
-                result = Some((up_offset + forward_offset + down_offset, hit));
-                max_forward = forward;
-                forward = (forward + least_forward) / 2.0;
-                continue;
-            }
-        }
-
-        least_forward = forward;
-        forward = (forward + max_forward) / 2.0;
-    }
-
-    result
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct MovementState {
     pub velocity: Vec3,
@@ -206,7 +95,7 @@ pub(crate) fn collide_and_slide(
     rotation: Quat,
     velocity: Vec3,
     current_ground_normal: Option<Dir3>,
-    config: CollideAndSlideConfig,
+    config: &CollideAndSlideConfig,
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     delta: f32,

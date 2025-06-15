@@ -5,26 +5,22 @@ use bevy::{
     input::InputSystem,
     prelude::*,
 };
+
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, Grounding, GroundingConfig, ground_check, is_walkable};
+use interactions::physics_interactions;
+use movement::{
+    CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement, MoveInput,
+    character_acceleration, character_drag, character_friction, character_gravity,
+    clear_movement_input, feet_position,
+};
+use platform::{
+    InheritedVelocity, PhysicsMover, inherit_platform_velocity, move_with_platform,
+    update_physics_mover, update_platform_velocity,
+};
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
-use sweep::{
-    CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, step_check, sweep,
-};
-
-use crate::prelude::{CharacterDrag, CharacterGravity, CharacterMovement, PhysicsMover};
-use crate::{
-    interactions::physics_interactions,
-    movement::{
-        character_acceleration, character_drag, character_friction, character_gravity,
-        clear_movement_input, feet_position,
-    },
-    platform::{
-        InheritedVelocity, inherit_platform_velocity, move_with_platform, update_physics_mover,
-        update_platform_velocity,
-    },
-    prelude::{CharacterFriction, MoveInput},
-};
+use stepping::{SteppingBehaviour, SteppingConfig, step_up};
+use sweep::{CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, sweep};
 
 pub mod debug;
 pub mod ground;
@@ -32,17 +28,18 @@ pub(crate) mod interactions;
 pub mod movement;
 pub mod platform;
 pub(crate) mod projection;
+pub mod stepping;
 pub mod sweep;
 
 pub mod prelude {
     pub use crate::{
         Character, CharacterPlugin, KinematicVelocity, OnGroundEnter, OnGroundLeave, OnStep,
-        SteppingBehaviour, SteppingConfig,
         ground::{Grounding, GroundingConfig},
         movement::{
             CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement, MoveInput,
         },
         platform::PhysicsMover,
+        stepping::{SteppingBehaviour, SteppingConfig},
         sweep::CollideAndSlideConfig,
     };
 }
@@ -77,15 +74,18 @@ impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((debug::plugin,));
 
-        app.register_type::<PhysicsMover>()
-            .register_type::<Character>()
-            .register_type::<CharacterMovement>()
-            .register_type::<CharacterFriction>()
-            .register_type::<CharacterGravity>()
-            .register_type::<CharacterDrag>()
-            .register_type::<SteppingConfig>()
-            .register_type::<Grounding>()
-            .register_type::<GroundingConfig>();
+        app.register_type::<(
+            Character,
+            PhysicsMover,
+            CharacterMovement,
+            CharacterFriction,
+            CharacterGravity,
+            CharacterDrag,
+            SteppingConfig,
+            SteppingBehaviour,
+            Grounding,
+            GroundingConfig,
+        )>();
 
         app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
 
@@ -94,8 +94,6 @@ impl Plugin for CharacterPlugin {
             (
                 CharacterSystems::Prepare.before(CharacterSystems::PhysicsInteractions),
                 CharacterSystems::PhysicsInteractions.before(PhysicsSet::Prepare),
-                // TODO: movement systems should use Position/Rotation instead of Transform 
-                // and they should run before the debug_render_colliders system so that debug shapes are not one frame behind
                 CharacterSystems::ApplyMovement.after(PhysicsSet::Sync),
             ),
         );
@@ -318,9 +316,9 @@ pub struct OnGroundLeave(pub Ground);
 #[derive(Event)]
 pub struct OnStep {
     /// The translation of the character before stepping.
-    pub origin: Vec3,
+    pub position_before_step: Vec3,
     /// The movement of the character during the step.
-    pub offset: Vec3,
+    pub step_offset: Vec3,
     pub hit: SweepHitData,
 }
 
@@ -333,7 +331,7 @@ pub(crate) fn move_character(
         &CollideAndSlideConfig,
         &mut KinematicVelocity,
         Option<(&mut Grounding, &GroundingConfig)>,
-        Option<&SteppingConfig>,
+        Option<(&SteppingConfig, &SteppingBehaviour)>,
         &mut Transform,
         &Collider,
         &CollideAndSlideFilter,
@@ -341,7 +339,7 @@ pub(crate) fn move_character(
         Option<&mut DebugMotion>,
         Has<DebugMode>,
     )>,
-    mut bodies: Query<&RigidBody>,
+    mut rigidbodies: Query<(&RigidBody, &CollisionLayers)>,
     mut collision_started_events: EventWriter<CollisionStarted>,
     mut collision_ended_events: EventWriter<CollisionEnded>,
     time: Res<Time>,
@@ -349,10 +347,10 @@ pub(crate) fn move_character(
     for (
         entity,
         character,
-        config,
+        collide_and_slide_config,
         mut velocity,
         mut grounding,
-        stepping_settings,
+        stepping_config,
         mut transform,
         collider,
         filter,
@@ -377,7 +375,7 @@ pub(crate) fn move_character(
                     collider,
                     transform.rotation,
                     character.up,
-                    config.skin_width,
+                    collide_and_slide_config.skin_width,
                 );
 
                 lines.push(
@@ -415,7 +413,7 @@ pub(crate) fn move_character(
             transform.rotation,
             velocity.0,
             current_ground_normal,
-            *config,
+            collide_and_slide_config,
             &filter.0,
             &spatial_query,
             duration,
@@ -425,7 +423,6 @@ pub(crate) fn move_character(
             },
             |state,
              MovementImpact {
-                 end,
                  remaining_motion,
                  hit,
                  ..
@@ -443,45 +440,55 @@ pub(crate) fn move_character(
                 };
 
                 // Try to step over obstacles
-                if let Some((stepping_settings, (grounding, grounding_settings))) =
-                    stepping_settings.zip(grounding.as_ref())
+                if let Some((
+                    (stepping_config, stepping_behaviour),
+                    (grounding, grounding_settings),
+                )) = stepping_config.zip(grounding.as_ref())
                 {
-                    let step_condition = match stepping_settings.behaviour {
+                    let step_condition = match stepping_behaviour {
                         SteppingBehaviour::Never => false,
                         SteppingBehaviour::Grounded => grounding.is_grounded(),
-                        SteppingBehaviour::GroundedOrFalling => {
-                            grounding.is_grounded() || state.velocity.dot(*character.up) < 0.0
-                        }
                         SteppingBehaviour::Always => true,
                     };
 
-                    let is_dynamic = match bodies.get_mut(hit.entity) {
-                        Ok(rb) => rb.is_dynamic(),
+                    let is_dynamic = match rigidbodies.get_mut(hit.entity) {
+                        Ok((rb, _)) => rb.is_dynamic(),
                         Err(_) => false,
                     };
 
                     let try_step = !surface.is_walkable && !is_dynamic && step_condition;
 
                     if try_step {
-                        if let Ok(direction) = Dir3::new(velocity.0.reject_from(*character.up)) {
-                            if let Some((offset, hit)) = step_check(
+                        let remaining_horizontal_velocity =
+                            (velocity.0 * remaining_motion).reject_from(*character.up);
+
+                        if let Ok((direction, motion)) =
+                            Dir3::new_and_length(remaining_horizontal_velocity)
+                        {
+                            if let Some((step_forward, step_up, hit)) = step_up(
                                 collider,
-                                end,
+                                transform.translation + state.offset,
                                 transform.rotation,
                                 direction,
-                                remaining_motion,
+                                motion,
                                 character.up,
-                                grounding_settings.max_angle,
-                                1.0,
-                                0.1,
-                                stepping_settings.max_height,
-                                config.skin_width,
-                                &spatial_query,
+                                collide_and_slide_config.skin_width,
+                                stepping_config,
                                 &filter.0,
+                                &spatial_query,
+                                |hit| {
+                                    is_walkable(
+                                        hit.normal,
+                                        grounding_settings.max_angle - 0.01,
+                                        *character.up,
+                                    )
+                                },
                             ) {
+                                let offset = direction * step_forward + character.up * step_up;
+
                                 commands.entity(entity).trigger(OnStep {
-                                    origin: transform.translation + state.offset,
-                                    offset,
+                                    position_before_step: transform.translation + state.offset,
+                                    step_offset: offset,
                                     hit,
                                 });
 
@@ -489,6 +496,8 @@ pub(crate) fn move_character(
                                     align_with_surface(state.velocity, hit.normal, *character.up);
                                 state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
+                                state.remaining_time =
+                                    f32::max(0.0, state.remaining_time - step_forward * duration);
 
                                 did_step = true;
 
@@ -536,7 +545,7 @@ pub(crate) fn move_character(
                     transform.rotation,
                     character.up,
                     grounding_settings.max_distance,
-                    config.skin_width,
+                    collide_and_slide_config.skin_width,
                     walkable_angle(grounding_settings.max_angle, grounding.is_grounded()),
                     &spatial_query,
                     &filter.0,
@@ -552,7 +561,7 @@ pub(crate) fn move_character(
                             transform.rotation,
                             character.up,
                             -hit.distance,
-                            config.skin_width,
+                            collide_and_slide_config.skin_width,
                             &spatial_query,
                             &filter.0,
                             true,
@@ -585,7 +594,7 @@ pub(crate) fn move_character(
                 collider,
                 transform.rotation,
                 character.up,
-                config.skin_width,
+                collide_and_slide_config.skin_width,
             );
 
             lines.push(
@@ -666,33 +675,6 @@ impl Default for Character {
 #[derive(Component, Reflect, Debug, Default, Clone, Copy, Deref, DerefMut)]
 #[reflect(Component)]
 pub struct KinematicVelocity(pub Vec3);
-
-/// Determines when the character should attempt to step up.
-#[derive(Reflect, Debug, PartialEq, Eq, Clone, Copy)]
-pub enum SteppingBehaviour {
-    Never,
-    Grounded,
-    GroundedOrFalling,
-    Always,
-}
-
-/// Configure stepping for a character.
-#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
-#[reflect(Component, Default)]
-#[require(GroundingConfig)]
-pub struct SteppingConfig {
-    pub max_height: f32,
-    pub behaviour: SteppingBehaviour,
-}
-
-impl Default for SteppingConfig {
-    fn default() -> Self {
-        Self {
-            max_height: 0.25,
-            behaviour: SteppingBehaviour::Grounded,
-        }
-    }
-}
 
 /// Cache the [`SpatialQueryFilter`] of the character to avoid re-allocating the excluded entities map every time it's used.
 #[derive(Component, Reflect, Default, Debug)]
