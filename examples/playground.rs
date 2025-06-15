@@ -55,7 +55,7 @@ fn main() -> AppExit {
             )
                 .chain(),
         )
-        .add_systems(FixedUpdate, move_physics_mover)
+        .add_systems(FixedUpdate, move_animated_platform)
         .run()
 }
 
@@ -174,7 +174,9 @@ fn setup(
         AngularDamping(10.0),
     ));
 
+    // physics mover
     commands.spawn((
+        AnimatedPlatform,
         PhysicsMover,
         RigidBody::Kinematic,
         Transform::from_xyz(-20.0, 1.0, 0.0),
@@ -182,6 +184,18 @@ fn setup(
         Mesh3d(meshes.add(cube)),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: MIDNIGHT_BLUE.into(),
+            ..Default::default()
+        })),
+    ));
+    // make sure the physics mover moves at the same rate/distance as the normal platform
+    commands.spawn((
+        AnimatedPlatform,
+        RigidBody::Kinematic,
+        Transform::from_xyz(-26.0, 1.0, 0.0),
+        Collider::from(cube),
+        Mesh3d(meshes.add(cube)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: MIDNIGHT_BLUE.with_alpha(0.5).into(),
             ..Default::default()
         })),
     ));
@@ -254,7 +268,12 @@ fn setup(
     ));
 }
 
-fn move_physics_mover(mut query: Query<&mut Transform, With<PhysicsMover>>, time: Res<Time>) {
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct AnimatedPlatform;
+
+fn move_animated_platform(mut query: Query<&mut Transform, With<AnimatedPlatform>>, time: Res<Time>) {
     for mut transform in &mut query {
         transform.translation.z = time.elapsed_secs().sin() * 10.0;
     }
