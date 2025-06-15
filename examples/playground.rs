@@ -190,12 +190,11 @@ fn setup(
     // make sure the physics mover moves at the same rate/distance as the normal platform
     commands.spawn((
         AnimatedPlatform,
-        RigidBody::Kinematic,
-        Transform::from_xyz(-26.0, 1.0, 0.0),
-        Collider::from(cube),
+        Transform::from_xyz(-24.0, 1.0, 0.0),
         Mesh3d(meshes.add(cube)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: MIDNIGHT_BLUE.with_alpha(0.5).into(),
+            base_color: CRIMSON.with_alpha(0.5).into(),
+            alpha_mode: AlphaMode::Blend,
             ..Default::default()
         })),
     ));
