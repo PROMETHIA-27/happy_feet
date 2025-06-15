@@ -5,7 +5,7 @@ use bevy::{color::palettes::css::*, prelude::*};
 
 use crate::{
     Character, KinematicVelocity, feet_position,
-    ground::{Grounding, GroundingConfig},
+    ground::Grounding,
     move_character,
     movement::{CharacterMovement, MoveInput},
     sweep::CollideAndSlideConfig,
@@ -209,7 +209,7 @@ fn draw_motion(
             ));
         }
 
-        // Draw last line to character if debug mode is disabled
+        // Draw the last line to character if debug mode is disabled
         if !debug_mode {
             points.push((
                 transform.translation
@@ -296,7 +296,7 @@ fn draw_motion(
 
             debug_motion.clear();
         } else {
-            // Only draw last point at character if debug mode is disabled
+            // Only draw the last point at character if debug mode is disabled
             let ground_normal = grounding.normal();
 
             dbg_point(DebugPoint {

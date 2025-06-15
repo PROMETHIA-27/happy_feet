@@ -1,4 +1,4 @@
-use avian3d::{prelude::*, sync::update_previous_global_transforms};
+use avian3d::prelude::*;
 use bevy::{
     color::palettes::css::*,
     ecs::{intern::Interned, schedule::ScheduleLabel},
@@ -94,6 +94,8 @@ impl Plugin for CharacterPlugin {
             (
                 CharacterSystems::Prepare.before(CharacterSystems::PhysicsInteractions),
                 CharacterSystems::PhysicsInteractions.before(PhysicsSet::Prepare),
+                // TODO: movement systems should use Position/Rotation instead of Transform 
+                // and they should run before the debug_render_colliders system so that debug shapes are not one frame behind
                 CharacterSystems::ApplyMovement.after(PhysicsSet::Sync),
             ),
         );
@@ -499,7 +501,7 @@ pub(crate) fn move_character(
                 // Trigger collision events
                 collision_started_events.write(CollisionStarted(entity, hit.entity));
 
-                // For now, assume the collision is ended instantly which is probably the case with move and slide anyways
+                // For now, assume the collision is ended instantly which is probably the case with move and slide anyway
                 collision_ended_events.write(CollisionEnded(entity, hit.entity));
 
                 if debug_mode {
