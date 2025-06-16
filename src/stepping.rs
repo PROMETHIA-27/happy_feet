@@ -56,6 +56,7 @@ pub(crate) fn step_up(
     let step_up_position = origin + up * step_up;
     let step_size = config.max_step_forward / config.max_iterations.max(1) as f32;
 
+    // Keep trying to step forward until we find a nice spot or give up
     for i in 0..config.max_iterations + 1 {
         // Step forward
         let mut step_forward = forward_motion + step_size * i as f32;
@@ -106,6 +107,7 @@ pub(crate) fn step_up(
             }
         }
 
+        // We hit a wall and will continue doing so if we continue
         if hit_wall {
             break;
         }
