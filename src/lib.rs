@@ -19,7 +19,7 @@ use platform::{
     update_physics_mover, update_platform_velocity,
 };
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
-use stepping::{SteppingBehaviour, SteppingConfig, step_up};
+use stepping::{StepOutput, SteppingBehaviour, SteppingConfig, step_up};
 use sweep::{CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, sweep};
 
 pub mod debug;
@@ -465,7 +465,11 @@ pub(crate) fn move_character(
                         if let Ok((direction, motion)) =
                             Dir3::new_and_length(remaining_horizontal_velocity)
                         {
-                            if let Some((step_forward, step_up, hit)) = step_up(
+                            if let Some(StepOutput {
+                                step_forward,
+                                step_up,
+                                hit,
+                            }) = step_up(
                                 collider,
                                 transform.translation + state.offset,
                                 transform.rotation,
@@ -497,7 +501,7 @@ pub(crate) fn move_character(
                                 state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
                                 state.remaining_time =
-                                    f32::max(0.0, state.remaining_time - step_forward * duration);
+                                    (state.remaining_time - step_forward * duration).max(0.0);
 
                                 did_step = true;
 

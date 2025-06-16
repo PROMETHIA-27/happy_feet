@@ -5,6 +5,12 @@ use crate::{
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
+pub(crate) struct StepOutput {
+    pub step_forward: f32,
+    pub step_up: f32,
+    pub hit: SweepHitData,
+}
+
 pub(crate) fn step_up(
     shape: &Collider,
     origin: Vec3,
@@ -17,9 +23,15 @@ pub(crate) fn step_up(
     filter: &SpatialQueryFilter,
     spatial_query: &SpatialQuery,
     mut can_step: impl FnMut(SweepHitData) -> bool,
-) -> Option<(f32, f32, SweepHitData)> {
+) -> Option<StepOutput> {
+    const EPSILON: f32 = 1e-4;
+
+    if config.max_iterations == 0 || config.max_step_forward <= 0.0 || config.max_step_up <= 0.0 {
+        return None;
+    }
+
     // Basically no motion, don't even try to step
-    if forward_motion < 1e-4 {
+    if forward_motion < EPSILON {
         return None;
     }
 
@@ -42,13 +54,15 @@ pub(crate) fn step_up(
     }
 
     // Head is already touching a roof or wall, can't step here
-    if step_up < 1e-4 {
+    if step_up < EPSILON {
         return None;
     }
 
     position += up * step_up;
 
     let mut total_step_forward = 0.0;
+
+    let step_size = config.max_step_forward / config.max_iterations as f32;
 
     for _ in 0..config.max_iterations {
         // Step forward
@@ -68,12 +82,13 @@ pub(crate) fn step_up(
         }
 
         // We're stuck :(
-        if current_step_forward < 1e-4 {
+        if current_step_forward < EPSILON {
             break;
         }
 
+        position += direction * current_step_forward;
+
         total_step_forward += current_step_forward;
-        position += direction * total_step_forward;
 
         // Step down
         if let Some(hit) = sweep(
@@ -87,20 +102,29 @@ pub(crate) fn step_up(
             filter,
             true,
         ) {
+            // Step height is too low
+            if step_up - hit.distance < EPSILON {
+                break;
+            }
+
             // We can step here!
             if can_step(hit) {
                 step_up -= hit.distance;
-                return Some((total_step_forward, step_up, hit));
+                return Some(StepOutput {
+                    step_forward: total_step_forward,
+                    step_up,
+                    hit,
+                });
             }
         }
 
         // Stepped too far, give up
-        if forward_motion > config.max_step_forward {
+        if total_step_forward > config.max_step_forward {
             break;
         }
 
         // Keep trying!
-        forward_motion = config.max_step_forward / config.max_iterations as f32;
+        forward_motion = step_size;
     }
 
     None
