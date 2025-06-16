@@ -16,7 +16,7 @@ pub(crate) fn step_up(
     origin: Vec3,
     rotation: Quat,
     direction: Dir3,
-    mut forward_motion: f32,
+    forward_motion: f32,
     up: Dir3,
     skin_width: f32,
     config: &SteppingConfig,
@@ -26,22 +26,17 @@ pub(crate) fn step_up(
 ) -> Option<StepOutput> {
     const EPSILON: f32 = 1e-4;
 
-    if config.max_iterations == 0 || config.max_step_forward <= 0.0 || config.max_step_up <= 0.0 {
+    // Validate input
+    if !config.is_valid() || forward_motion < EPSILON {
         return None;
     }
-
-    // Basically no motion, don't even try to step
-    if forward_motion < EPSILON {
-        return None;
-    }
-
-    let mut position = origin;
 
     // Step up
     let mut step_up = config.max_step_up;
+
     if let Some(hit) = sweep(
         shape,
-        position,
+        origin,
         rotation,
         up,
         config.max_step_up,
@@ -53,47 +48,45 @@ pub(crate) fn step_up(
         step_up = hit.distance;
     }
 
-    // Head is already touching a roof or wall, can't step here
+    // Head is already touching a roof or wall
     if step_up < EPSILON {
         return None;
     }
 
-    position += up * step_up;
+    let step_up_position = origin + up * step_up;
+    let step_size = config.max_step_forward / config.max_iterations.max(1) as f32;
 
-    let mut total_step_forward = 0.0;
-
-    let step_size = config.max_step_forward / config.max_iterations as f32;
-
-    for _ in 0..config.max_iterations {
+    for i in 0..config.max_iterations + 1 {
         // Step forward
-        let mut current_step_forward = forward_motion;
+        let mut step_forward = forward_motion + step_size * i as f32;
+        let mut hit_wall = false;
+
         if let Some(hit) = sweep(
             shape,
-            position,
+            step_up_position,
             rotation,
             direction,
-            forward_motion,
+            step_forward,
             skin_width,
             spatial_query,
             filter,
             false,
         ) {
-            current_step_forward = hit.distance;
+            // We're stuck :(
+            if hit.distance < EPSILON {
+                break;
+            }
+
+            hit_wall = true;
+            step_forward = hit.distance;
         }
 
-        // We're stuck :(
-        if current_step_forward < EPSILON {
-            break;
-        }
-
-        position += direction * current_step_forward;
-
-        total_step_forward += current_step_forward;
+        let step_forward_position = step_up_position + direction * step_forward;
 
         // Step down
         if let Some(hit) = sweep(
             shape,
-            position,
+            step_forward_position,
             rotation,
             -up,
             config.max_step_up,
@@ -102,29 +95,20 @@ pub(crate) fn step_up(
             filter,
             true,
         ) {
-            // Step height is too low
-            if step_up - hit.distance < EPSILON {
-                break;
-            }
-
             // We can step here!
-            if can_step(hit) {
+            if step_up - hit.distance > EPSILON && can_step(hit) {
                 step_up -= hit.distance;
                 return Some(StepOutput {
-                    step_forward: total_step_forward,
+                    step_forward,
                     step_up,
                     hit,
                 });
             }
         }
 
-        // Stepped too far, give up
-        if total_step_forward > config.max_step_forward {
+        if hit_wall {
             break;
         }
-
-        // Keep trying!
-        forward_motion = step_size;
     }
 
     None
@@ -150,12 +134,18 @@ pub struct SteppingConfig {
     pub max_iterations: usize,
 }
 
+impl SteppingConfig {
+    pub fn is_valid(&self) -> bool {
+        self.max_step_up > 0.0 && self.max_step_forward > 0.0
+    }
+}
+
 impl Default for SteppingConfig {
     fn default() -> Self {
         Self {
             max_step_up: 0.25,
-            max_step_forward: 0.25,
-            max_iterations: 6,
+            max_step_forward: 0.4,
+            max_iterations: 8,
         }
     }
 }
