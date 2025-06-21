@@ -1,6 +1,6 @@
 {
 	"asset":{
-		"generator":"Khronos glTF Blender I/O v4.5.15",
+		"generator":"Khronos glTF Blender I/O v4.5.46",
 		"version":"2.0"
 	},
 	"extensionsUsed":[
@@ -111,7 +111,7 @@
 			"translation":[
 				-9.999999046325684,
 				0,
-				-12
+				-50
 			]
 		},
 		{
@@ -1882,12 +1882,12 @@
 			"max":[
 				0.19999998807907104,
 				4,
-				2
+				40
 			],
 			"min":[
 				-0.19999998807907104,
 				-4,
-				-2
+				-40
 			],
 			"type":"VEC3"
 		},

@@ -56,7 +56,14 @@ fn main() -> AppExit {
                 .chain(),
         )
         .add_systems(FixedUpdate, move_animated_platform)
+        // .add_systems(FixedUpdate, dbg_speed)
         .run()
+}
+
+fn dbg_speed(query: Query<&KinematicVelocity>) {
+    for velocity in query.iter() {
+        dbg!("{:?}", velocity.length());
+    }
 }
 
 fn capture_mouse(mut query: Query<&mut Window, Added<PrimaryWindow>>) {
