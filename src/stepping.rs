@@ -58,7 +58,7 @@ pub(crate) fn step_up(
 
     for i in 0..config.max_iterations + 1 {
         // Step forward
-        let mut step_forward = forward_motion + step_size * i as f32;
+        let mut step_forward = forward_motion.max(skin_width) + step_size * i as f32;
         let mut hit_wall = false;
 
         if let Some(hit) = sweep(

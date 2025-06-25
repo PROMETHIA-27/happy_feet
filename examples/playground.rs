@@ -471,7 +471,7 @@ fn move_input(
         input.set(camera_transform.rotation * axis.normalize_or_zero());
 
         if actions.get::<Sneak>().unwrap().value().as_bool() {
-            input.value *= 0.33;
+            input.value *= 0.1;
         }
     }
 }
