@@ -39,6 +39,7 @@ fn main() -> AppExit {
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
         .add_observer(on_toggle_fly_mode)
+        .add_observer(on_step)
         .add_systems(Startup, setup)
         .add_systems(PreUpdate, update_movement_settings)
         .add_systems(
@@ -52,6 +53,7 @@ fn main() -> AppExit {
                 update_attachments.after(TransformSystem::TransformPropagate),
                 update_camera_offset,
                 sync_attachment_global_transforms,
+                update_camera_step_offset,
             )
                 .chain(),
         )
@@ -231,7 +233,7 @@ fn setup(
                 ..Default::default()
             },
         ),
-        // Sensor,
+        CameraStepOffset(Vec3::ZERO),
         walking_actions(),
         Mass(10.0),
         CollisionEventsEnabled,
@@ -503,14 +505,20 @@ fn look_input(
     Ok(())
 }
 
+fn update_camera_step_offset(mut query: Query<&mut CameraStepOffset>, time: Res<Time>) {
+    for mut offset in &mut query {
+        offset.0.smooth_nudge(&Vec3::ZERO, 10.0, time.delta_secs());
+    }
+}
+
 fn update_camera_offset(
-    characters: Query<&Character>,
+    characters: Query<(&Character, &CameraStepOffset)>,
     mut cameras: Query<(&mut Transform, &PlayerCamera, &AttachedTo)>,
 ) -> Result {
     for (mut camera_transform, player_camera, attached_to) in &mut cameras {
-        let character = characters.get(attached_to.0)?;
+        let (character, camera_step_offset) = characters.get(attached_to.0)?;
 
-        let mut offset = character.up * player_camera.eye_height;
+        let mut offset = camera_step_offset.0 + character.up * player_camera.eye_height;
         offset += camera_transform.rotation * Vec3::Z * player_camera.distance;
 
         camera_transform.translation += offset;
@@ -540,6 +548,18 @@ fn sync_attachment_global_transforms(
     }
 
     Ok(())
+}
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct CameraStepOffset(Vec3);
+
+fn on_step(trigger: Trigger<OnStep>, mut query: Query<&mut CameraStepOffset>) {
+    let Ok(mut offset) = query.get_mut(trigger.target()) else {
+        return;
+    };
+
+    offset.0 += -trigger.step_offset;
 }
 
 fn on_collision_events_start(
