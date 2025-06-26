@@ -1,13 +1,33 @@
 use std::mem;
 
 use avian3d::prelude::*;
-use bevy::prelude::*;
+use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
-    Character, KinematicVelocity, align_with_surface,
-    debug::DebugMode,
+    character::KinematicVelocity,
     ground::{Grounding, GroundingConfig},
+    projection::align_with_surface,
 };
+
+pub struct MovementPlugin;
+
+impl Plugin for MovementPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
+
+        app.add_systems(
+            PhysicsSchedule,
+            (
+                character_drag,
+                character_friction,
+                character_gravity,
+                character_acceleration,
+            )
+                .in_set(PhysicsStepSet::First)
+                .chain(),
+        );
+    }
+}
 
 pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
     for mut move_input in &mut query {
@@ -19,18 +39,21 @@ pub(crate) fn character_gravity(
     default_gravity: Res<Gravity>,
     mut query: Query<(
         &mut KinematicVelocity,
-        Option<&CharacterGravity>,
+        &CharacterGravity,
         Option<&Grounding>,
         Option<&GravityScale>,
     )>,
     time: Res<Time>,
 ) {
     for (mut velocity, character_gravity, grounding, gravity_scale) in &mut query {
-        if grounding.map_or(false, |g| g.is_grounded()) {
+        if grounding.is_some_and(|g| g.is_grounded()) {
             continue;
         }
 
-        let mut gravity = character_gravity.map_or(default_gravity.0, |g| g.0);
+        let mut gravity = match character_gravity.0 {
+            Some(gravity) => gravity,
+            None => default_gravity.0,
+        };
 
         if let Some(gravity_scale) = gravity_scale {
             gravity *= gravity_scale.0;
@@ -56,10 +79,10 @@ pub(crate) fn character_friction(
         // Multiply friction by the friction scale
         if let Ok(s) = frictions.get(ground.entity) {
             friction *= s.0;
-        } else if let Ok(collider_of) = colliders.get(ground.entity) {
-            if let Ok(s) = frictions.get(collider_of.body) {
-                friction *= s.0;
-            }
+        } else if let Ok(collider_of) = colliders.get(ground.entity)
+            && let Ok(s) = frictions.get(collider_of.body)
+        {
+            friction *= s.0;
         }
 
         let f = friction_factor(velocity.0, friction, time.delta_secs());
@@ -79,35 +102,26 @@ pub(crate) fn character_drag(
 
 pub(crate) fn character_acceleration(
     mut query: Query<(
-        &Character,
         &MoveInput,
         &mut KinematicVelocity,
         Option<(&Grounding, &GroundingConfig)>,
         &CharacterMovement,
-        Has<DebugMode>,
     )>,
     time: Res<Time>,
 ) {
-    for (character, move_input, mut character_velocity, grounding, movement, debug_mode) in
-        &mut query
-    {
+    for (move_input, mut character_velocity, grounding, movement) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
 
-        if debug_mode {
-            character_velocity.0 = direction * movement.target_speed * throttle;
-            continue;
-        }
-
         let mut direction = *direction;
         let mut velocity = character_velocity.0;
 
-        if let Some((grounding, _grounding_settings)) = grounding {
-            if let Some(normal) = grounding.normal() {
-                direction = align_with_surface(direction, *normal, *character.up);
-                velocity = align_with_surface(velocity, *normal, *character.up);
-            }
+        if let Some((grounding, grounding_config)) = grounding
+            && let Some(normal) = grounding.normal()
+        {
+            direction = align_with_surface(direction, *normal, *grounding_config.up_direction);
+            velocity = align_with_surface(velocity, *normal, *grounding_config.up_direction);
         }
 
         let move_accel = acceleration(
@@ -154,20 +168,20 @@ impl CharacterMovement {
 
 /// The gravity force affecting a character while it's not grounded.
 /// If no gravity is defined, then the [`Gravity`] resource will be used instead.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component, Default)]
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[reflect(Component, Default, Debug, Clone)]
 #[require(KinematicVelocity)]
-pub struct CharacterGravity(pub Vec3);
+pub struct CharacterGravity(pub Option<Vec3>);
 
-impl Default for CharacterGravity {
-    fn default() -> Self {
-        Self(Vec3::Y * -9.81)
+impl CharacterGravity {
+    pub fn new(gravity: Vec3) -> Self {
+        Self(Some(gravity))
     }
 }
 
 impl CharacterGravity {
-    pub const ZERO: Self = Self(Vec3::ZERO);
-    pub const EARTH: Self = Self(Vec3::new(0.0, -9.81, 0.0));
+    pub const ZERO: Self = Self(Some(Vec3::ZERO));
+    pub const EARTH: Self = Self(Some(Vec3::new(0.0, -9.81, 0.0)));
 }
 
 /// The friction scale when a character walks on an entity.

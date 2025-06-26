@@ -3,12 +3,13 @@ use std::{f32::consts::PI, fmt::Debug};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::sweep::{SweepHitData, sweep};
+use crate::sweep::{SweepHitData, sweep_filtered};
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(Grounding)]
 pub struct GroundingConfig {
+    pub up_direction: Dir3,
     /// Max walkable angle
     pub max_angle: f32,
     /// Max distance from the ground
@@ -19,6 +20,7 @@ pub struct GroundingConfig {
 impl Default for GroundingConfig {
     fn default() -> Self {
         Self {
+            up_direction: Dir3::Y,
             max_angle: PI / 4.0,
             max_distance: 0.2,
             snap_to_surface: true,
@@ -139,19 +141,21 @@ pub(crate) fn ground_check(
     max_distance: f32,
     skin_width: f32,
     walkable_angle: f32,
-    spatial_query: &SpatialQuery,
-    filter: &SpatialQueryFilter,
+    query_pipeline: &SpatialQueryPipeline,
+    query_filter: &SpatialQueryFilter,
+    filter_hits: impl FnMut(&SweepHitData) -> bool,
 ) -> Option<(Ground, SweepHitData)> {
-    let hit = sweep(
+    let hit = sweep_filtered(
         collider,
         translation,
         rotation,
         -up,
         max_distance,
         skin_width,
-        spatial_query,
-        filter,
+        query_pipeline,
+        query_filter,
         true,
+        filter_hits,
     )?;
 
     if is_walkable(hit.normal, walkable_angle, *up) {
@@ -159,7 +163,16 @@ pub(crate) fn ground_check(
     }
 
     if let Some(ray_hit) = forward
-        .and_then(|forward| ground_rays(hit.point, forward, up, skin_width, filter, spatial_query))
+        .and_then(|forward| {
+            ground_rays(
+                hit.point,
+                forward,
+                up,
+                skin_width,
+                query_filter,
+                query_pipeline,
+            )
+        })
         .filter(|h| is_walkable(h.normal, walkable_angle, *up))
     {
         return Some((Ground::new(ray_hit.entity, ray_hit.normal), hit));
@@ -168,22 +181,23 @@ pub(crate) fn ground_check(
     None
 }
 
+// TODO: thjis is fucl
 pub(crate) fn ground_rays(
     origin: Vec3,
     forward: Dir3,
     up: Dir3,
     distance: f32,
     filter: &SpatialQueryFilter,
-    spatial_query: &SpatialQuery,
+    query_pipeline: &SpatialQueryPipeline,
 ) -> Option<RayHitData> {
-    let hit1 = spatial_query.cast_ray(
+    let hit1 = query_pipeline.cast_ray(
         origin + up * distance + forward * distance,
         -up,
         distance * 2.0,
         true,
         filter,
     );
-    let hit2 = spatial_query.cast_ray(
+    let hit2 = query_pipeline.cast_ray(
         origin + up * distance - forward * distance,
         -up,
         distance * 2.0,

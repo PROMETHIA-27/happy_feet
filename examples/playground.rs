@@ -8,11 +8,7 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
-use happy_feet::{
-    debug::{DebugInput, DebugMode, DebugMotion},
-    movement::jump,
-    prelude::*,
-};
+use happy_feet::{movement::jump, prelude::*};
 
 fn main() -> AppExit {
     App::new()
@@ -21,7 +17,7 @@ fn main() -> AppExit {
             PhysicsPlugins::default(),
             // PhysicsDebugPlugin::default(),
             SkeinPlugin::default(),
-            CharacterPlugin::default(),
+            CharacterPlugins::default(),
             EnhancedInputPlugin,
         ))
         .insert_resource(AmbientLight {
@@ -37,7 +33,6 @@ fn main() -> AppExit {
         .add_observer(on_ground_leave)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
-        .add_observer(on_toggle_debug_mode)
         .add_observer(on_toggle_fly_mode)
         // .add_observer(on_step)
         .add_systems(Startup, setup)
@@ -118,13 +113,13 @@ impl MovementMode {
             (MovementMode::Walking, true) => (
                 CharacterMovement::DEFAULT_GROUND,
                 CharacterDrag::default(),
-                CharacterGravity(Vec3::NEG_Y * 20.0),
+                CharacterGravity(Some(Vec3::NEG_Y * 20.0)),
                 CharacterFriction::default(),
             ),
             (MovementMode::Walking, false) => (
                 CharacterMovement::DEFAULT_AIR,
                 CharacterDrag::default(),
-                CharacterGravity(Vec3::NEG_Y * 20.0),
+                CharacterGravity(Some(Vec3::NEG_Y * 20.0)),
                 CharacterFriction::ZERO,
             ),
             (MovementMode::Flying, _) => (
@@ -216,9 +211,9 @@ fn setup(
         MovementMode::Walking,
         (
             // Restitution::new(1.0),
-            Character::default(),
-            DebugMotion::default(),
-            DebugInput,
+            Character,
+            // DebugMotion::default(),
+            // DebugInput,
             CharacterMovement::DEFAULT_AIR,
             CharacterGravity::default(),
             CharacterFriction::default(),
@@ -312,10 +307,6 @@ struct TogglePerspective;
 
 #[derive(InputAction, Debug)]
 #[input_action(output = bool)]
-struct ToggleDebugMode;
-
-#[derive(InputAction, Debug)]
-#[input_action(output = bool)]
 struct ToggleFlyMode;
 
 fn walking_actions() -> Actions<Walking> {
@@ -355,11 +346,6 @@ fn walking_actions() -> Actions<Walking> {
         .with_conditions(Press::default());
 
     actions
-        .bind::<ToggleDebugMode>()
-        .to(KeyCode::Tab)
-        .with_conditions(Press::default());
-
-    actions
 }
 
 fn on_toggle_fly_mode(
@@ -372,31 +358,15 @@ fn on_toggle_fly_mode(
             *mode = MovementMode::Flying;
 
             drag.0 = 10.0;
-            gravity.0 = Vec3::ZERO;
+            gravity.0 = Some(Vec3::ZERO);
         }
         MovementMode::Flying => {
             *mode = MovementMode::Walking;
 
             drag.0 = 0.01;
-            gravity.0 = Vec3::NEG_Y * 20.0;
+            gravity.0 = Some(Vec3::NEG_Y * 20.0);
         }
     }
-}
-
-fn on_toggle_debug_mode(
-    trigger: Trigger<Fired<ToggleDebugMode>>,
-    mut commands: Commands,
-    debug_modes: Query<Has<DebugMode>>,
-) {
-    match debug_modes.get(trigger.target()).unwrap() {
-        true => commands
-            .entity(trigger.target())
-            .remove::<DebugMode>()
-            .insert(DebugMotion::default()),
-        false => commands
-            .entity(trigger.target())
-            .insert((DebugMode, DebugMotion::default())),
-    };
 }
 
 fn on_toggle_perspective(
@@ -423,13 +393,18 @@ fn on_jump(
     mut query: Query<(
         &mut KinematicVelocity,
         &mut Grounding,
-        &Character,
+        &GroundingConfig,
         &MovementMode,
     )>,
 ) -> Result {
-    let (mut velocity, mut grounding, character, mode) = query.get_mut(trigger.target())?;
+    let (mut velocity, mut grounding, grounding_config, mode) = query.get_mut(trigger.target())?;
     if let MovementMode::Walking = mode {
-        jump(7.0, &mut velocity, &mut grounding, character.up);
+        jump(
+            7.0,
+            &mut velocity,
+            &mut grounding,
+            grounding_config.up_direction,
+        );
     }
     Ok(())
 }
@@ -517,13 +492,14 @@ fn update_camera_step_offset(mut query: Query<&mut CameraStepOffset>, time: Res<
 }
 
 fn update_camera_offset(
-    characters: Query<(&Character, &CameraStepOffset)>,
+    characters: Query<(&GroundingConfig, &CameraStepOffset)>,
     mut cameras: Query<(&mut Transform, &PlayerCamera, &AttachedTo)>,
 ) -> Result {
     for (mut camera_transform, player_camera, attached_to) in &mut cameras {
-        let (character, camera_step_offset) = characters.get(attached_to.0)?;
+        let (grounding_config, camera_step_offset) = characters.get(attached_to.0)?;
 
-        let mut offset = camera_step_offset.0 + character.up * player_camera.eye_height;
+        let mut offset =
+            camera_step_offset.0 + grounding_config.up_direction * player_camera.eye_height;
         offset += camera_transform.rotation * Vec3::Z * player_camera.distance;
 
         camera_transform.translation += offset;
@@ -559,12 +535,12 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-fn on_step(trigger: Trigger<OnStep>, mut query: Query<&mut CameraStepOffset>) {
+fn on_step(trigger: Trigger<CharacterStep>, mut query: Query<&mut CameraStepOffset>) {
     let Ok(mut offset) = query.get_mut(trigger.target()) else {
         return;
     };
 
-    offset.0 += -trigger.step_offset;
+    offset.0 += -trigger.offset;
 }
 
 fn on_collision_events_start(
@@ -599,10 +575,10 @@ fn on_collision_events_end(
     );
 }
 
-fn on_ground_enter(_: Trigger<OnGroundEnter>) {
+fn on_ground_enter(_: Trigger<GroundEnter>) {
     info!("ENTERED GROUND");
 }
 
-fn on_ground_leave(_: Trigger<OnGroundLeave>) {
+fn on_ground_leave(_: Trigger<GroundLeave>) {
     info!("LEFT GROUND");
 }

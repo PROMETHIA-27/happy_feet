@@ -1,9 +1,48 @@
 use std::mem;
 
 use avian3d::{prelude::*, sync::PreviousGlobalTransform};
-use bevy::prelude::*;
+use bevy::{
+    ecs::{intern::Interned, schedule::ScheduleLabel},
+    prelude::*,
+};
 
-use crate::{KinematicVelocity, OnGroundLeave, ground::Grounding};
+use crate::character::GroundLeave;
+use crate::{character::KinematicVelocity, ground::Grounding};
+
+pub struct MovingPlatformPlugin {
+    pub schedule: Interned<dyn ScheduleLabel>,
+}
+
+impl Default for MovingPlatformPlugin {
+    fn default() -> Self {
+        Self::new(FixedPostUpdate.intern())
+    }
+}
+
+impl MovingPlatformPlugin {
+    pub fn new(schedule: impl ScheduleLabel) -> Self {
+        Self {
+            schedule: schedule.intern(),
+        }
+    }
+}
+
+impl Plugin for MovingPlatformPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            self.schedule,
+            (
+                update_physics_mover,
+                update_inherited_velocity,
+                move_with_platform,
+            )
+                .before(PhysicsSet::StepSimulation)
+                .chain(),
+        );
+
+        app.add_observer(apply_inherited_velocity_on_ground_leave);
+    }
+}
 
 /// A kinematic rigid body that is moved and rotated using `Transform`.
 #[derive(Component, Reflect, Debug, Clone)]
@@ -36,15 +75,15 @@ pub(crate) fn update_physics_mover(
     }
 }
 
-pub(crate) fn update_platform_velocity(
+pub(crate) fn update_inherited_velocity(
     mut characters: Query<(
         &KinematicVelocity,
         &Grounding,
         &mut InheritedVelocity,
-        &Transform,
+        &Position,
     )>,
     colliders: Query<&ColliderOf>,
-    rigidbodies: Query<(
+    rigid_bodies: Query<(
         &LinearVelocity,
         &AngularVelocity,
         &ComputedCenterOfMass,
@@ -52,13 +91,13 @@ pub(crate) fn update_platform_velocity(
     )>,
     time: Res<Time>,
 ) -> Result {
-    for (velocity, grounding, mut inherited_velocity, transform) in &mut characters {
+    for (velocity, grounding, mut inherited_velocity, position) in &mut characters {
         let Some(collider) = grounding.inner_ground else {
             inherited_velocity.0 = Vec3::ZERO;
             continue;
         };
 
-        let rigidbody = colliders
+        let rigid_body = colliders
             .get(collider.entity)
             .map_or(collider.entity, |it| it.body);
 
@@ -67,7 +106,7 @@ pub(crate) fn update_platform_velocity(
             platform_angular_velocity,
             platform_center_of_mass,
             platform_transform,
-        )) = rigidbodies.get(rigidbody)
+        )) = rigid_bodies.get(rigid_body)
         else {
             inherited_velocity.0 = Vec3::ZERO;
             continue;
@@ -79,7 +118,7 @@ pub(crate) fn update_platform_velocity(
             platform_position,
             platform_linear_velocity.0,
             platform_angular_velocity.0,
-            transform.translation,
+            position.0,
             velocity.0,
             time.delta_secs(),
         );
@@ -88,23 +127,23 @@ pub(crate) fn update_platform_velocity(
     Ok(())
 }
 
-pub(crate) fn inherit_platform_velocity(
-    trigger: Trigger<OnGroundLeave>,
+pub(crate) fn move_with_platform(
+    mut query: Query<(&mut Position, &InheritedVelocity)>,
+    time: Res<Time>,
+) {
+    for (mut position, inherited_velocity) in &mut query {
+        position.0 += inherited_velocity.0 * time.delta_secs();
+    }
+}
+
+pub(crate) fn apply_inherited_velocity_on_ground_leave(
+    trigger: Trigger<GroundLeave>,
     mut query: Query<(&mut KinematicVelocity, &mut InheritedVelocity)>,
 ) {
     let Ok((mut velocity, mut platform_velocity)) = query.get_mut(trigger.target()) else {
         return;
     };
     velocity.0 += mem::take(&mut platform_velocity.0);
-}
-
-pub(crate) fn move_with_platform(
-    mut query: Query<(&mut Transform, &InheritedVelocity)>,
-    time: Res<Time>,
-) {
-    for (mut transform, inherited_velocity) in &mut query {
-        transform.translation += inherited_velocity.0 * time.delta_secs();
-    }
 }
 
 /// The velocity of the ground a character is standing on.
