@@ -39,7 +39,7 @@ fn main() -> AppExit {
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_debug_mode)
         .add_observer(on_toggle_fly_mode)
-        .add_observer(on_step)
+        // .add_observer(on_step)
         .add_systems(Startup, setup)
         .add_systems(PreUpdate, update_movement_settings)
         .add_systems(
