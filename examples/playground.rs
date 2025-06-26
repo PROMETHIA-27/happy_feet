@@ -511,7 +511,7 @@ fn look_input(
 
 fn update_camera_step_offset(mut query: Query<&mut CameraStepOffset>, time: Res<Time>) {
     for mut offset in &mut query {
-        offset.0.smooth_nudge(&Vec3::ZERO, 10.0, time.delta_secs());
+        offset.0.smooth_nudge(&Vec3::ZERO, 20.0, time.delta_secs());
     }
 }
 

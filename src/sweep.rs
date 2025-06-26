@@ -3,9 +3,7 @@ use std::mem;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{
-    CollideAndSlideFilter, CollisionState, ground::Ground, projection::Surface,
-};
+use crate::{CollideAndSlideFilter, CollisionState, ground::Ground, projection::Surface};
 
 #[derive(Reflect, Debug, Clone, Copy)]
 pub struct SweepHitData {

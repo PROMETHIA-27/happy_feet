@@ -350,7 +350,7 @@ pub(crate) fn move_character(
         collide_and_slide_config,
         mut velocity,
         mut grounding,
-        mut stepping_config,
+        stepping_config,
         mut transform,
         collider,
         filter,
@@ -407,7 +407,7 @@ pub(crate) fn move_character(
 
         let mut did_step = false;
 
-        let mut new_step_movement = StepDelta::default(); // huh?
+        let mut new_step_movement = StepDelta::default();
 
         let mut movement = collide_and_slide(
             collider,
@@ -462,12 +462,14 @@ pub(crate) fn move_character(
                         if let Ok((direction, motion)) =
                             Dir3::new_and_length(remaining_horizontal_velocity)
                         {
-                            // Remove last step stuff from stepping config
+                            // Remove last step delta from stepping config
                             let stepping_config = SteppingConfig {
-                                max_vertical: stepping_config.max_vertical
-                                    - last_step_movement.vertical,
-                                max_horizontal: stepping_config.max_horizontal
-                                    - last_step_movement.horizontal,
+                                // max_vertical: (stepping_config.max_vertical
+                                //     - last_step_movement.vertical)
+                                //     .max(0.0),
+                                max_horizontal: (stepping_config.max_horizontal
+                                    - last_step_movement.horizontal)
+                                    .max(0.0),
                                 ..**stepping_config
                             };
 

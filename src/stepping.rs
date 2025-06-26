@@ -237,6 +237,6 @@ impl Default for SteppingConfig {
 
 impl SteppingConfig {
     pub fn is_valid(&self) -> bool {
-        self.max_vertical > 0.0 && self.max_horizontal > 0.0
+        self.max_vertical > 0.0 && self.max_horizontal >= 0.0
     }
 }
