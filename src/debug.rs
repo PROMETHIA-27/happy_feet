@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
-
-use avian3d::prelude::*;
+use avian3d::{parry::shape::TypedShape, prelude::*};
 use bevy::{color::palettes::css::*, prelude::*};
+use std::collections::VecDeque;
 
 use crate::{
     Character, KinematicVelocity, feet_position,
@@ -227,7 +226,15 @@ fn draw_motion(
 
         // hits
         let mut dbg_point = |debug: DebugPoint| {
-            let radius = 0.2;
+            let radius = match collider.shape().as_typed_shape() {
+                TypedShape::Capsule(capsule) => capsule.radius,
+                TypedShape::Cylinder(cylinder) => cylinder.radius,
+                TypedShape::Ball(ball) => ball.radius,
+                _ => {
+                    warn!("Unsupported collider shape");
+                    0.2
+                }
+            };
 
             let color = [LIGHT_GREEN, CRIMSON];
 

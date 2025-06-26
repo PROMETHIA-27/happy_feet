@@ -208,9 +208,6 @@ fn setup(
         })),
     ));
 
-    // let shape = Capsule3d::new(0.4, 1.0);
-    // let shape = Cuboid::from_length(0.4);
-    // let shape = Cone::new(0.4, 1.4);
     let shape = Capsule3d::new(0.2, 1.0);
     // let shape = Cylinder::new(0.2, 1.0);
 
@@ -480,7 +477,7 @@ fn move_input(
         input.set(camera_transform.rotation * axis.normalize_or_zero());
 
         if actions.get::<Sneak>().unwrap().value().as_bool() {
-            input.value *= 0.1;
+            input.value *= 0.2;
         }
     }
 }

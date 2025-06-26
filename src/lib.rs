@@ -19,7 +19,7 @@ use platform::{
     update_physics_mover, update_platform_velocity,
 };
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
-use stepping::{StepOutput, SteppingBehaviour, SteppingConfig, step_up};
+use stepping::{StepOutput, SteppingBehaviour, SteppingConfig, step};
 use sweep::{CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, sweep};
 
 pub mod debug;
@@ -464,7 +464,7 @@ pub(crate) fn move_character(
                                 step_forward,
                                 step_up,
                                 hit,
-                            }) = step_up(
+                            }) = step(
                                 collider,
                                 transform.translation + state.offset,
                                 transform.rotation,
@@ -483,6 +483,7 @@ pub(crate) fn move_character(
                                     )
                                 },
                             ) {
+                                // dbg!(motion - step_forward);
                                 let offset = direction * step_forward + character.up * step_up;
 
                                 commands.entity(entity).trigger(OnStep {
