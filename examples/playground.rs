@@ -223,7 +223,7 @@ fn setup(
             CharacterFriction::default(),
             CharacterDrag::default(),
             SteppingConfig {
-                max_step_up: 0.4,
+                max_vertical: 0.4,
                 ..Default::default()
             },
             SteppingBehaviour::Always,

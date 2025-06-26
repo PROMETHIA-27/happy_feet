@@ -9,8 +9,8 @@ const STEP_EPSILON: f32 = 1e-4;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StepOutput {
-    pub step_forward: f32,
-    pub step_up: f32,
+    pub horizontal: f32,
+    pub vertical: f32,
     pub hit: SweepHitData,
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn step(
         rotation,
         up,
         skin_width,
-        config.max_step_up,
+        config.max_vertical,
         filter,
         spatial_query,
     )?;
@@ -113,7 +113,7 @@ fn step_forward(
     let mut step_forward = forward_motion;
 
     let max_iterations = config.max_iterations + 1;
-    let step_size = config.max_step_forward / config.max_iterations.max(1) as f32;
+    let step_size = config.max_horizontal / config.max_iterations.max(1) as f32;
 
     // Try to find the minimum step forward amount that is still steppable
     for i in 0..max_iterations {
@@ -150,8 +150,8 @@ fn step_forward(
             if step_up - hit.distance > STEP_EPSILON && can_step(hit) {
                 // We can stand here
                 valid_step = Some(StepOutput {
-                    step_forward,
-                    step_up: step_up - hit.distance + skin_width,
+                    horizontal: step_forward,
+                    vertical: step_up - hit.distance + skin_width,
                     hit,
                 });
 
@@ -171,7 +171,7 @@ fn step_forward(
                 // info!("true -> {}", step_forward);
 
                 if let Some(last_min_valid_step) = min_valid_step.replace(valid_step) {
-                    if last_min_valid_step.step_forward - step_forward < STEP_EPSILON {
+                    if last_min_valid_step.horizontal - step_forward < STEP_EPSILON {
                         // info!("threshold reached");
                         break;
                     }
@@ -189,12 +189,20 @@ fn step_forward(
             None => step_forward += step_size,
             // Step to the middle of the furthest invalid step and the closest valid step
             Some(min_valid_step) => {
-                step_forward = (min_step_forward + min_valid_step.step_forward) / 2.0;
+                step_forward = (min_step_forward + min_valid_step.horizontal) / 2.0;
             }
         }
     }
 
     min_valid_step
+}
+
+/// The step movement of the previous iteration.
+#[derive(Component, Reflect, Default, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
+pub(crate) struct StepDelta {
+    pub vertical: f32,
+    pub horizontal: f32,
 }
 
 /// Determines when the character should attempt to step up.
@@ -210,18 +218,18 @@ pub enum SteppingBehaviour {
 /// Configure stepping for a character.
 #[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
 #[reflect(Component, Default)]
-#[require(GroundingConfig, SteppingBehaviour)]
+#[require(GroundingConfig, SteppingBehaviour, StepDelta)]
 pub struct SteppingConfig {
-    pub max_step_up: f32,
-    pub max_step_forward: f32,
+    pub max_vertical: f32,
+    pub max_horizontal: f32,
     pub max_iterations: usize,
 }
 
 impl Default for SteppingConfig {
     fn default() -> Self {
         Self {
-            max_step_up: 0.25,
-            max_step_forward: 0.4,
+            max_vertical: 0.25,
+            max_horizontal: 0.4,
             max_iterations: 8,
         }
     }
@@ -229,6 +237,6 @@ impl Default for SteppingConfig {
 
 impl SteppingConfig {
     pub fn is_valid(&self) -> bool {
-        self.max_step_up > 0.0 && self.max_step_forward > 0.0
+        self.max_vertical > 0.0 && self.max_horizontal > 0.0
     }
 }

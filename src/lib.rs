@@ -19,7 +19,7 @@ use platform::{
     update_physics_mover, update_platform_velocity,
 };
 use projection::{CollisionState, Surface, align_with_surface, project_velocity};
-use stepping::{StepOutput, SteppingBehaviour, SteppingConfig, step};
+use stepping::{StepDelta, StepOutput, SteppingBehaviour, SteppingConfig, step};
 use sweep::{CollideAndSlideConfig, MovementImpact, SweepHitData, collide_and_slide, sweep};
 
 pub mod debug;
@@ -331,7 +331,7 @@ pub(crate) fn move_character(
         &CollideAndSlideConfig,
         &mut KinematicVelocity,
         Option<(&mut Grounding, &GroundingConfig)>,
-        Option<(&SteppingConfig, &SteppingBehaviour)>,
+        Option<(&SteppingConfig, &SteppingBehaviour, &mut StepDelta)>,
         &mut Transform,
         &Collider,
         &CollideAndSlideFilter,
@@ -350,7 +350,7 @@ pub(crate) fn move_character(
         collide_and_slide_config,
         mut velocity,
         mut grounding,
-        stepping_config,
+        mut stepping_config,
         mut transform,
         collider,
         filter,
@@ -407,6 +407,8 @@ pub(crate) fn move_character(
 
         let mut did_step = false;
 
+        let mut new_step_movement = StepDelta::default(); // huh?
+
         let mut movement = collide_and_slide(
             collider,
             transform.translation,
@@ -436,9 +438,9 @@ pub(crate) fn move_character(
 
                 // Try to step over obstacles
                 if let Some((
-                    (stepping_config, stepping_behaviour),
+                    (stepping_config, stepping_behaviour, last_step_movement),
                     (grounding, grounding_settings),
-                )) = stepping_config.zip(grounding.as_ref())
+                )) = stepping_config.as_ref().zip(grounding.as_ref())
                 {
                     let step_condition = match stepping_behaviour {
                         SteppingBehaviour::Never => false,
@@ -460,9 +462,18 @@ pub(crate) fn move_character(
                         if let Ok((direction, motion)) =
                             Dir3::new_and_length(remaining_horizontal_velocity)
                         {
+                            // Remove last step stuff from stepping config
+                            let stepping_config = SteppingConfig {
+                                max_vertical: stepping_config.max_vertical
+                                    - last_step_movement.vertical,
+                                max_horizontal: stepping_config.max_horizontal
+                                    - last_step_movement.horizontal,
+                                ..**stepping_config
+                            };
+
                             if let Some(StepOutput {
-                                step_forward,
-                                step_up,
+                                horizontal,
+                                vertical,
                                 hit,
                             }) = step(
                                 collider,
@@ -472,7 +483,7 @@ pub(crate) fn move_character(
                                 motion,
                                 character.up,
                                 collide_and_slide_config.skin_width,
-                                stepping_config,
+                                &stepping_config,
                                 &filter.0,
                                 &spatial_query,
                                 |hit| {
@@ -483,8 +494,11 @@ pub(crate) fn move_character(
                                     )
                                 },
                             ) {
+                                new_step_movement.horizontal += horizontal;
+                                new_step_movement.vertical += vertical;
+
                                 // dbg!(motion - step_forward);
-                                let offset = direction * step_forward + character.up * step_up;
+                                let offset = direction * horizontal + character.up * vertical;
 
                                 commands.entity(entity).trigger(OnStep {
                                     position_before_step: transform.translation + state.offset,
@@ -497,7 +511,7 @@ pub(crate) fn move_character(
                                 state.ground = Some(Ground::new(hit.entity, hit.normal));
                                 state.offset += offset;
                                 state.remaining_time =
-                                    (state.remaining_time - step_forward * duration).max(0.0);
+                                    (state.remaining_time - horizontal * duration).max(0.0);
 
                                 did_step = true;
 
@@ -534,6 +548,11 @@ pub(crate) fn move_character(
                 Some(surface)
             },
         );
+
+        // update step movement
+        if let Some((_, _, mut last_step_movement)) = stepping_config {
+            *last_step_movement = new_step_movement;
+        }
 
         let mut new_translation = transform.translation + movement.offset;
 
