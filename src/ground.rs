@@ -134,6 +134,7 @@ pub(crate) fn ground_check(
     collider: &Collider,
     translation: Vec3,
     rotation: Quat,
+    forward: Option<Dir3>,
     up: Dir3,
     max_distance: f32,
     skin_width: f32,
@@ -153,9 +154,51 @@ pub(crate) fn ground_check(
         true,
     )?;
 
-    let ground = Ground::new_if_walkable(hit.entity, hit.normal, up, walkable_angle)?;
+    if is_walkable(hit.normal, walkable_angle, *up) {
+        return Some((Ground::new(hit.entity, hit.normal), hit));
+    }
 
-    Some((ground, hit))
+    if let Some(ray_hit) = forward
+        .and_then(|forward| ground_rays(hit.point, forward, up, skin_width, filter, spatial_query))
+        .filter(|h| is_walkable(h.normal, walkable_angle, *up))
+    {
+        return Some((Ground::new(ray_hit.entity, ray_hit.normal), hit));
+    }
+
+    None
+}
+
+pub(crate) fn ground_rays(
+    origin: Vec3,
+    forward: Dir3,
+    up: Dir3,
+    distance: f32,
+    filter: &SpatialQueryFilter,
+    spatial_query: &SpatialQuery,
+) -> Option<RayHitData> {
+    let hit1 = spatial_query.cast_ray(
+        origin + up * distance + forward * distance,
+        -up,
+        distance * 2.0,
+        true,
+        filter,
+    );
+    let hit2 = spatial_query.cast_ray(
+        origin + up * distance - forward * distance,
+        -up,
+        distance * 2.0,
+        true,
+        filter,
+    );
+
+    match (hit1, hit2) {
+        (Some(hit), None) | (None, Some(hit)) => match hit.distance > 0.0 {
+            true => Some(hit),
+            false => None,
+        },
+        (Some(hit1), Some(hit2)) => None,
+        (None, None) => None,
+    }
 }
 
 pub(crate) fn is_walkable(normal: Vec3, walkable_angle: f32, up: Vec3) -> bool {

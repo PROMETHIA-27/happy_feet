@@ -421,12 +421,7 @@ pub(crate) fn move_character(
                 Some(_) => surface.project_velocity(velocity, current_ground_normal, character.up),
                 None => velocity.reject_from(*surface.normal),
             },
-            |state,
-             MovementImpact {
-                 remaining_motion,
-                 hit,
-                 ..
-             }| {
+            |state, MovementImpact { hit, .. }| {
                 let surface = match grounding.as_ref() {
                     Some((grounding, grounding_settings)) => Surface::new(
                         hit.normal,
@@ -460,7 +455,7 @@ pub(crate) fn move_character(
 
                     if try_step {
                         let remaining_horizontal_velocity =
-                            (velocity.0 * remaining_motion).reject_from(*character.up);
+                            (velocity.0 * state.remaining_time).reject_from(*character.up);
 
                         if let Ok((direction, motion)) =
                             Dir3::new_and_length(remaining_horizontal_velocity)
@@ -547,6 +542,7 @@ pub(crate) fn move_character(
                     collider,
                     new_translation,
                     transform.rotation,
+                    Dir3::new(movement.velocity).ok(),
                     character.up,
                     grounding_settings.max_distance,
                     collide_and_slide_config.skin_width,
