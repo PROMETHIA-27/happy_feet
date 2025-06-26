@@ -60,6 +60,17 @@ pub(crate) struct MovementState {
     pub ground: Option<Ground>,
 }
 
+impl MovementState {
+    pub fn new(velocity: Vec3, duration: f32) -> Self {
+        Self {
+            velocity,
+            offset: Vec3::ZERO,
+            remaining_time: duration,
+            ground: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MovementImpact {
     pub start: Vec3,
@@ -100,12 +111,7 @@ pub(crate) fn collide_and_slide(
     mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
     mut on_hit: impl FnMut(&mut MovementState, MovementImpact) -> Option<Surface>,
 ) -> MovementState {
-    let mut state = MovementState {
-        velocity,
-        offset: Vec3::ZERO,
-        remaining_time: delta,
-        ground: None,
-    };
+    let mut state = MovementState::new(velocity, delta);
 
     let mut previous_velocity = state.velocity;
 
