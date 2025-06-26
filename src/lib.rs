@@ -5,7 +5,6 @@ use bevy::{
     input::InputSystem,
     prelude::*,
 };
-
 use debug::{CharacterGizmos, DebugHit, DebugMode, DebugMotion, DebugPoint};
 use ground::{Ground, Grounding, GroundingConfig, ground_check, is_walkable};
 use interactions::physics_interactions;
@@ -322,6 +321,16 @@ pub struct OnStep {
     pub hit: SweepHitData,
 }
 
+/// Triggered when a character hits an obstacle.
+#[derive(Event)]
+pub struct OnCharacterHit {
+    /// The translation of the character at the time of the hit.
+    pub position: Vec3,
+    /// The velocity of the character at the time of the hit.
+    pub velocity: Vec3,
+    pub hit: SweepHitData,
+}
+
 pub(crate) fn move_character(
     mut commands: Commands,
     spatial_query: SpatialQuery,
@@ -538,6 +547,12 @@ pub(crate) fn move_character(
                         }
                     }
                 }
+
+                commands.entity(entity).trigger(OnCharacterHit {
+                    position: transform.translation + state.offset,
+                    velocity: state.velocity,
+                    hit,
+                });
 
                 // Trigger collision events
                 collision_started_events.write(CollisionStarted(entity, hit.entity));
