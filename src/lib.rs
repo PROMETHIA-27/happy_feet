@@ -332,6 +332,7 @@ pub(crate) fn move_character(
         &mut KinematicVelocity,
         Option<(&mut Grounding, &GroundingConfig)>,
         Option<(&SteppingConfig, &SteppingBehaviour, &mut StepDelta)>,
+        Option<&Restitution>,
         &mut Transform,
         &Collider,
         &CollideAndSlideFilter,
@@ -350,7 +351,8 @@ pub(crate) fn move_character(
         collide_and_slide_config,
         mut velocity,
         mut grounding,
-        stepping_config,
+        stepping,
+        restitution,
         mut transform,
         collider,
         filter,
@@ -419,9 +421,23 @@ pub(crate) fn move_character(
             &filter.0,
             &spatial_query,
             duration,
-            |velocity, surface| match grounding {
-                Some(_) => surface.project_velocity(velocity, current_ground_normal, character.up),
-                None => velocity.reject_from(*surface.normal),
+            |mut velocity, surface| {
+                let mut bounce = Vec3::ZERO;
+                if let Some(restitution) = restitution {
+                    if !surface.is_walkable {
+                        bounce = -velocity.project_onto(*surface.normal) * restitution.coefficient;
+                    }
+                }
+
+                match grounding {
+                    Some(_) => {
+                        velocity =
+                            surface.project_velocity(velocity, current_ground_normal, character.up)
+                    }
+                    None => velocity = velocity.reject_from(*surface.normal),
+                };
+
+                velocity + bounce
             },
             |state, MovementImpact { hit, .. }| {
                 let surface = match grounding.as_ref() {
@@ -440,7 +456,7 @@ pub(crate) fn move_character(
                 if let Some((
                     (stepping_config, stepping_behaviour, last_step_movement),
                     (grounding, grounding_settings),
-                )) = stepping_config.as_ref().zip(grounding.as_ref())
+                )) = stepping.as_ref().zip(grounding.as_ref())
                 {
                     let step_condition = match stepping_behaviour {
                         SteppingBehaviour::Never => false,
@@ -552,7 +568,7 @@ pub(crate) fn move_character(
         );
 
         // update step movement
-        if let Some((_, _, mut last_step_movement)) = stepping_config {
+        if let Some((_, _, mut last_step_movement)) = stepping {
             *last_step_movement = new_step_movement;
         }
 

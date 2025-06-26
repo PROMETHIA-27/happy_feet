@@ -215,6 +215,7 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         (
+            // Restitution::new(1.0),
             Character::default(),
             DebugMotion::default(),
             DebugInput,
