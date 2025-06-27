@@ -16,3 +16,4 @@ Work in progress kinematic character controller for the bevy game engine.
   - [ ] fix character can't push bodies during collide and slide
   - [ ] dynamic bodies can push character
   - [ ] downward gravity force when standing on bodies
+- [ ] change crate name to [`toboggan`](https://duckduckgo.com/?q=toboggan+penguin&t=ffab&ia=images&iax=images)?
