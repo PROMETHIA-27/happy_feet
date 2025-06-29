@@ -76,8 +76,8 @@ pub struct Projectile;
 /// Similar to [`Projectile`] but adds grounding logic that modifies how velocity is projected
 /// when sliding on surfaces. This enables behaviors like walking up slopes and stepping over
 /// small obstacles while maintaining proper ground contact.
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug, Clone)]
+#[derive(Component, Reflect, Default, Debug, Clone)]
+#[reflect(Component, Default, Debug, Clone)]
 #[require(
     RigidBody = RigidBody::Kinematic,
     KinematicVelocity,
