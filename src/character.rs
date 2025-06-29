@@ -58,6 +58,10 @@ impl Plugin for CharacterPlugin {
     }
 }
 
+/// A marker component for setting up basic projectile movement.
+///
+/// Provides collide-and-slide physics behavior, using [`KinematicVelocity`] for movement
+/// and handling collisions with obstacles.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component, Debug, Clone)]
 #[require(
@@ -67,6 +71,11 @@ impl Plugin for CharacterPlugin {
 )]
 pub struct Projectile;
 
+/// A marker component for setting up character movement.
+///
+/// Similar to [`Projectile`] but adds grounding logic that modifies how velocity is projected
+/// when sliding on surfaces. This enables behaviors like walking up slopes and stepping over
+/// small obstacles while maintaining proper ground contact.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component, Debug, Clone)]
 #[require(
@@ -80,19 +89,24 @@ pub struct Projectile;
 pub struct Character;
 
 /// The velocity of a character.
-#[derive(Component, Reflect, Debug, Default, Clone, Copy, Deref, DerefMut)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
 pub struct KinematicVelocity(pub Vec3);
 
+/// Event that is triggered when a character or projectile collides with an obstacle during movement.
 #[derive(Event, Reflect)]
-pub struct CharacterHit {
+pub struct OnHit {
+    /// The velocity of the entity at the moment of impact
     pub velocity: Vec3,
+    /// Detailed information about the collision, including the hit entity, position, and normal
     pub hit: MovementHitData,
 }
 
 /// Triggered when a character stepped over an obstacle.
 #[derive(Event, Reflect)]
-pub struct CharacterStep {
+pub struct OnStep {
+    /// The velocity of the entity before stepping
+    pub velocity: Vec3,
     /// The translation of the character before stepping.
     pub origin: Vec3,
     /// The movement of the character during the step.
@@ -105,13 +119,13 @@ pub struct CharacterStep {
 /// This is only triggered for the last ground the character touched during the update and will not be triggered
 /// if the character was already grounded prior to the start of the update.
 #[derive(Event, Reflect, Deref)]
-pub struct GroundEnter(pub Ground);
+pub struct OnGroundEnter(pub Ground);
 
 /// Triggered when the character becomes ungrounded during a movement update.
 ///
 /// This is only triggered if the character is ungrounded at the end of the update.
 #[derive(Event, Reflect, Deref)]
-pub struct GroundLeave(pub Ground);
+pub struct OnGroundLeave(pub Ground);
 
 // TODO: is this necessary?
 fn update_query_pipeline(mut spatial_query: SpatialQuery) {
@@ -236,8 +250,9 @@ fn process_movement(
                         let duration = horizontal * time.delta_secs();
 
                         // Trigger step event
-                        commands.entity(entity).trigger(CharacterStep {
+                        commands.entity(entity).trigger(OnStep {
                             origin: movement.position,
+                            velocity: movement.velocity,
                             offset,
                             hit: step_hit,
                         });
@@ -257,7 +272,7 @@ fn process_movement(
                     }
                 }
 
-                commands.entity(entity).trigger(CharacterHit {
+                commands.entity(entity).trigger(OnHit {
                     hit,
                     velocity: movement.velocity,
                 });
@@ -371,10 +386,10 @@ fn trigger_grounding_events(
     for (entity, grounding, previous_grounding) in &mut query {
         match (previous_grounding.inner_ground, grounding.inner_ground) {
             (Some(ground), None) => {
-                commands.entity(entity).trigger(GroundLeave(ground));
+                commands.entity(entity).trigger(OnGroundLeave(ground));
             }
             (None, Some(ground)) => {
-                commands.entity(entity).trigger(GroundEnter(ground));
+                commands.entity(entity).trigger(OnGroundEnter(ground));
             }
             _ => {}
         }
@@ -489,7 +504,7 @@ pub(crate) fn depenetrate(
                 let ground = Ground::new(other, hit_normal);
 
                 if !grounding.is_grounded() {
-                    commands.entity(entity).trigger(GroundEnter(ground));
+                    commands.entity(entity).trigger(OnGroundEnter(ground));
                 }
 
                 **grounding = ground.into();

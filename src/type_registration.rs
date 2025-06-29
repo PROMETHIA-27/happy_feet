@@ -11,10 +11,10 @@ impl Plugin for CharacterTypeRegistrationPlugin {
             character::Character,
             character::Projectile,
             character::KinematicVelocity,
-            character::CharacterHit,
-            character::CharacterStep,
-            character::GroundEnter,
-            character::GroundLeave,
+            character::OnHit,
+            character::OnStep,
+            character::OnGroundEnter,
+            character::OnGroundLeave,
         )>();
         app.register_type::<(
             collide_and_slide::MovementState,
@@ -33,7 +33,7 @@ impl Plugin for CharacterTypeRegistrationPlugin {
             movement::MoveInput,
             movement::CharacterMovement,
             movement::CharacterGravity,
-            movement::CharacterFriction,
+            movement::GroundFriction,
             movement::CharacterDrag,
             movement::FrictionScale,
             movement::CharacterBounce,

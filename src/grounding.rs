@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use crate::sweep::{SweepHitData, sweep_filtered};
 
+/// Configuration parameters for character grounding behavior.
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(Grounding)]
@@ -28,21 +29,24 @@ impl Default for GroundingConfig {
     }
 }
 
+/// Stores the previous ground state of a character.
 #[derive(Component, Reflect, Deref, Default, Debug, Clone, Copy)]
 #[reflect(Component, Default, Debug, Clone)]
 pub struct PreviousGrounding(pub(crate) Grounding);
 
-/// The ground state of a character.
+/// Represents the current ground state of a character.
 #[derive(Component, Reflect, Default, Debug, PartialEq, Clone, Copy)]
 #[reflect(Component, Default, Debug, PartialEq, Clone)]
 #[require(PreviousGrounding)]
 pub struct Grounding {
+    /// The current ground state, if any.
     pub(crate) inner_ground: Option<Ground>,
-    /// If the character should be forced to detach from the ground, e.g., after jumping.
+    /// Controls whether the character should be forced to detach from the ground, e.g., after jumping.
     should_detach: bool,
 }
 
 impl Grounding {
+    /// Creates a new [`Grounding`] instance with an optional ground surface.
     pub fn new(surface: Option<Ground>) -> Self {
         Self {
             inner_ground: surface,
@@ -50,10 +54,26 @@ impl Grounding {
         }
     }
 
+    /// Returns whether the character should be forced to detach from its current ground.
+    ///
+    /// Returns `true` if detachment is requested (e.g., after jumping), `false` otherwise.
+    pub fn should_detach(&self) -> bool {
+        self.should_detach
+    }
+
+    /// Returns whether the character is currently grounded
+    ///
+    /// A character is considered grounded when it is in contact with a ground surface (`inner_ground` is `Some`)
+    /// and is not marked for detachment (`should_detach` is `false`).
     pub fn is_grounded(&self) -> bool {
         !self.should_detach && self.inner_ground.is_some()
     }
 
+    /// Returns the current ground state of the character.
+    ///
+    /// This method respects the grounding state and will return `None` if:
+    /// - There is no ground surface (`inner_ground` is `None`)
+    /// - The character is marked for detachment (`should_detach` is `true`)
     pub fn ground(&self) -> Option<Ground> {
         if self.should_detach {
             return None;
@@ -61,7 +81,24 @@ impl Grounding {
         self.inner_ground
     }
 
-    /// Detach from the ground without clearing the [`inner_ground`](Self::inner_ground).
+    /// Detach from the ground if currently grounded and returns the current ground state.
+    ///
+    /// This method should be called when the character needs to intentionally leave the ground,
+    /// typically when initiating a jump.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use happy_feet::prelude::*;
+    /// #
+    /// # let mut grounding = Grounding::default();
+    /// # let mut velocity = Vec3::ZERO;
+    /// # let key = ButtonInput::default();
+    /// #
+    /// if grounding.is_grounded() && key.just_pressed(KeyCode::Space) {
+    ///     velocity.y = 10.0;
+    ///     grounding.detach();
+    /// }
+    /// ```
     pub fn detach(&mut self) -> Option<Ground> {
         if !self.is_grounded() {
             return None;
@@ -71,14 +108,25 @@ impl Grounding {
         self.inner_ground
     }
 
+    /// Returns the normal vector of the current ground surface if grounded.
+    ///
+    /// This method respects the grounding state and will return `None` if:
+    /// - There is no ground surface (`inner_ground` is `None`)
+    /// - The character is marked for detachment (`should_detach` is `true`)
     pub fn normal(&self) -> Option<Dir3> {
         self.ground().map(|ground| ground.normal)
     }
 
+    /// Returns the [`Entity`] of the current ground surface if grounded.
+    ///
+    /// This method respects the grounding state and will return `None` if:
+    /// - There is no ground surface (`inner_ground` is `None`)
+    /// - The character is marked for detachment (`should_detach` is `true`)
     pub fn entity(&self) -> Option<Entity> {
         self.ground().map(|ground| ground.entity)
     }
 
+    /// Returns the internal ground state without checking detachment status.
     pub fn inner_ground(&self) -> Option<Ground> {
         self.inner_ground
     }

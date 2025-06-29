@@ -1,3 +1,6 @@
+//! This example is gross, truly awful, it's only used for testing and is not meant to be understandable.
+//! See [minimal](minimal.rs) instead.
+
 use std::f32::consts::PI;
 
 use avian3d::prelude::*;
@@ -107,26 +110,38 @@ impl MovementMode {
         CharacterMovement,
         CharacterDrag,
         CharacterGravity,
-        CharacterFriction,
+        GroundFriction,
     ) {
+        let target_speed = 8.0;
+
+        let ground_movement = CharacterMovement {
+            target_speed,
+            acceleration: 100.0,
+        };
+
+        let air_movement = CharacterMovement {
+            target_speed,
+            acceleration: 20.0,
+        };
+
         match (self, grounded) {
             (MovementMode::Walking, true) => (
-                CharacterMovement::DEFAULT_GROUND,
+                ground_movement,
                 CharacterDrag::default(),
                 CharacterGravity(Some(Vec3::NEG_Y * 20.0)),
-                CharacterFriction::default(),
+                GroundFriction::default(),
             ),
             (MovementMode::Walking, false) => (
-                CharacterMovement::DEFAULT_AIR,
+                air_movement,
                 CharacterDrag::default(),
                 CharacterGravity(Some(Vec3::NEG_Y * 20.0)),
-                CharacterFriction::ZERO,
+                GroundFriction::ZERO,
             ),
             (MovementMode::Flying, _) => (
-                CharacterMovement::DEFAULT_GROUND,
+                ground_movement,
                 CharacterDrag(10.0),
                 CharacterGravity::ZERO,
-                CharacterFriction::ZERO,
+                GroundFriction::ZERO,
             ),
         }
     }
@@ -218,9 +233,9 @@ fn setup(
             },
             // DebugMotion::default(),
             // DebugInput,
-            CharacterMovement::DEFAULT_AIR,
+            CharacterMovement::default(),
             CharacterGravity::default(),
-            CharacterFriction::default(),
+            GroundFriction::default(),
             CharacterDrag::default(),
             SteppingConfig {
                 max_vertical: 0.4,
@@ -419,7 +434,7 @@ fn update_movement_settings(
         &mut CharacterMovement,
         &mut CharacterDrag,
         &mut CharacterGravity,
-        &mut CharacterFriction,
+        &mut GroundFriction,
         &MovementMode,
     )>,
 ) {
@@ -539,7 +554,7 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-fn on_step(trigger: Trigger<CharacterStep>, mut query: Query<&mut CameraStepOffset>) {
+fn on_step(trigger: Trigger<OnStep>, mut query: Query<&mut CameraStepOffset>) {
     let Ok(mut offset) = query.get_mut(trigger.target()) else {
         return;
     };
@@ -579,10 +594,10 @@ fn on_collision_events_end(
     );
 }
 
-fn on_ground_enter(_: Trigger<GroundEnter>) {
+fn on_ground_enter(_: Trigger<OnGroundEnter>) {
     info!("ENTERED GROUND");
 }
 
-fn on_ground_leave(_: Trigger<GroundLeave>) {
+fn on_ground_leave(_: Trigger<OnGroundLeave>) {
     info!("LEFT GROUND");
 }

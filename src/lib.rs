@@ -19,14 +19,13 @@ pub mod prelude {
     pub use crate::{
         CharacterPlugins,
         character::{
-            Character, CharacterHit, CharacterStep, GroundEnter, GroundLeave, KinematicVelocity,
-            Projectile,
+            Character, KinematicVelocity, OnGroundEnter, OnGroundLeave, OnHit, OnStep, Projectile,
         },
         collide_and_slide::CollideAndSlideConfig,
         grounding::{Ground, Grounding, GroundingConfig},
         movement::{
-            CharacterBounce, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
-            MoveInput, MovementPlugin,
+            BrakeFactor, CharacterBounce, CharacterDrag, GroundFriction, CharacterGravity,
+            CharacterMovement, MoveInput, MovementPlugin,
         },
         moving_platform::{InheritedVelocity, MovingPlatformPlugin, PhysicsMover},
         stepping::{SteppingBehaviour, SteppingConfig},

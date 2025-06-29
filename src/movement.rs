@@ -4,7 +4,7 @@ use avian3d::prelude::*;
 use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
-    character::{CharacterHit, KinematicVelocity},
+    character::{KinematicVelocity, OnHit},
     grounding::{Grounding, GroundingConfig},
     projection::align_with_surface,
 };
@@ -66,7 +66,7 @@ pub(crate) fn character_gravity(
 }
 
 pub(crate) fn character_friction(
-    mut characters: Query<(&mut KinematicVelocity, &Grounding, &CharacterFriction)>,
+    mut characters: Query<(&mut KinematicVelocity, &Grounding, &GroundFriction)>,
     frictions: Query<&FrictionScale>,
     colliders: Query<&ColliderOf>,
     time: Res<Time>,
@@ -108,10 +108,11 @@ pub(crate) fn character_acceleration(
         &mut KinematicVelocity,
         Option<(&Grounding, &GroundingConfig)>,
         &CharacterMovement,
+        Option<&BrakeFactor>,
     )>,
     time: Res<Time>,
 ) {
-    for (move_input, mut character_velocity, grounding, movement) in &mut query {
+    for (move_input, mut character_velocity, grounding, movement, brake_factor) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
@@ -119,36 +120,41 @@ pub(crate) fn character_acceleration(
         let mut direction = *direction;
         let mut velocity = character_velocity.0;
 
-        if let Some((grounding, grounding_config)) = grounding
-            && let Some(normal) = grounding.normal()
-        {
-            direction = align_with_surface(direction, *normal, *grounding_config.up_direction);
-            velocity = align_with_surface(velocity, *normal, *grounding_config.up_direction);
+        if let Some((grounding, grounding_config)) = grounding {
+            if let Some(normal) = grounding.normal() {
+                direction = align_with_surface(direction, *normal, *grounding_config.up_direction);
+                velocity = align_with_surface(velocity, *normal, *grounding_config.up_direction);
+            }
+
+            if brake_factor.is_some() {
+                velocity = velocity.reject_from(*grounding_config.up_direction);
+            }
         }
 
-        let move_accel = acceleration(
-            velocity,
-            direction,
-            movement.acceleration * throttle,
-            movement.target_speed * throttle,
-            time.delta_secs(),
-        );
-
-        // let move_accel = acceleration_with_brake(
-        //     velocity.reject_from_normalized(*character.up),
-        //     direction,
-        //     movement.acceleration * throttle,
-        //     movement.target_speed * throttle,
-        //     BrakeFactor::all(0.1),
-        //     time.delta_secs(),
-        // );
+        let move_accel = match brake_factor {
+            None => acceleration(
+                velocity,
+                direction,
+                movement.acceleration * throttle,
+                movement.target_speed * throttle,
+                time.delta_secs(),
+            ),
+            Some(brake_factor) => acceleration_with_brake(
+                velocity,
+                direction,
+                movement.acceleration * throttle,
+                movement.target_speed * throttle,
+                *brake_factor,
+                time.delta_secs(),
+            ),
+        };
 
         character_velocity.0 += move_accel;
     }
 }
 
 pub(crate) fn bounce_on_character_hit(
-    trigger: Trigger<CharacterHit>,
+    trigger: Trigger<OnHit>,
     mut query: Query<(
         &mut KinematicVelocity,
         &CharacterBounce,
@@ -177,29 +183,26 @@ pub(crate) fn bounce_on_character_hit(
     }
 }
 
-/// Used for moving a character based on it's [`MoveInput`].
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
+/// Used for modifying [`KinematicVelocity`] based on [`MoveInput`].
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(MoveInput, KinematicVelocity)]
 pub struct CharacterMovement {
     pub target_speed: f32,
     pub acceleration: f32,
 }
 
-impl CharacterMovement {
-    pub const DEFAULT_GROUND: Self = Self {
-        target_speed: 8.0,
-        acceleration: 100.0,
-    };
-
-    pub const DEFAULT_AIR: Self = Self {
-        target_speed: 8.0,
-        acceleration: 20.0,
-    };
+impl Default for CharacterMovement {
+    fn default() -> Self {
+        Self {
+            target_speed: 8.0,
+            acceleration: 100.0,
+        }
+    }
 }
 
 /// The gravity force affecting a character while it's not grounded.
-/// If no gravity is defined, then the [`Gravity`] resource will be used instead.
+/// If no gravity is defined, then the [`Gravity`] resource will be used.
 #[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(KinematicVelocity)]
@@ -226,21 +229,21 @@ pub struct FrictionScale(pub f32);
 #[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
 #[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
-pub struct CharacterFriction(pub f32);
+pub struct GroundFriction(pub f32);
 
-impl Default for CharacterFriction {
+impl Default for GroundFriction {
     fn default() -> Self {
         Self(60.0)
     }
 }
 
-impl CharacterFriction {
+impl GroundFriction {
     pub const ZERO: Self = Self(0.0);
 }
 
 /// The drag force applied to the [`KinematicVelocity`] of a character.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct CharacterDrag(pub f32);
 
@@ -372,7 +375,8 @@ pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 
 }
 
 /// Factors controlling braking behavior in different directions.
-#[derive(Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[reflect(Component, Debug, Clone)]
 pub struct BrakeFactor {
     /// Slow down backward motion when moving against the input direction.
     pub reverse: f32,
@@ -433,7 +437,7 @@ pub fn acceleration_with_brake(
         accel += rev_brake_speed * direction;
     }
 
-    // Leteral braking.
+    // Lateral braking.
     if brake_factor.lateral.abs() > 0.0 {
         let perp_vel = velocity - current_speed * direction;
         accel -= perp_vel.clamp_length_max(max_acceleration * brake_factor.lateral * delta);

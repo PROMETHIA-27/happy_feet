@@ -1,8 +1,5 @@
 use avian3d::prelude::*;
-use bevy::{
-    ecs::{component::HookContext, world::DeferredWorld},
-    prelude::*,
-};
+use bevy::prelude::*;
 
 use crate::sweep::{SweepHitData, sweep_filtered};
 

@@ -1,7 +1,7 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::character::{CharacterHit, KinematicVelocity};
+use crate::character::{OnHit, KinematicVelocity};
 
 pub struct PhysicsInteractionPlugin;
 
@@ -12,7 +12,7 @@ impl Plugin for PhysicsInteractionPlugin {
 }
 
 fn physics_interaction_on_hit(
-    trigger: Trigger<CharacterHit>,
+    trigger: Trigger<OnHit>,
     mut commands: Commands,
     mut bodies: Query<(
         &RigidBody,
