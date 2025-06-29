@@ -131,19 +131,21 @@ pub(crate) fn character_acceleration(
             }
         }
 
+        let max_acceleration = movement.acceleration * throttle;
+
         let move_accel = match brake_factor {
             None => acceleration(
                 velocity,
                 direction,
-                movement.acceleration * throttle,
-                movement.target_speed * throttle,
+                max_acceleration,
+                movement.target_speed,
                 time.delta_secs(),
             ),
             Some(brake_factor) => acceleration_with_brake(
                 velocity,
                 direction,
-                movement.acceleration * throttle,
-                movement.target_speed * throttle,
+                max_acceleration,
+                movement.target_speed,
                 *brake_factor,
                 time.delta_secs(),
             ),
@@ -336,7 +338,24 @@ pub fn feet_position(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32
 }
 
 #[must_use]
-fn acceleration(
+pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
+    f32::exp(-drag * delta)
+}
+
+/// Constant acceleration in the opposite direction of velocity.
+#[must_use]
+pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
+    let speed_sq = velocity.length_squared();
+
+    if speed_sq < 1e-4 {
+        return 0.0;
+    }
+
+    f32::exp(-friction / speed_sq.sqrt() * delta)
+}
+
+#[must_use]
+pub fn acceleration(
     velocity: Vec3,
     direction: Vec3,
     max_acceleration: f32,
@@ -355,23 +374,6 @@ fn acceleration(
     let accel_speed = f32::min(target_speed - current_speed, max_acceleration * delta);
 
     direction * accel_speed
-}
-
-#[must_use]
-pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
-    f32::exp(-drag * delta)
-}
-
-/// Constant acceleration in the opposite direction of velocity.
-#[must_use]
-pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
-    let speed_sq = velocity.length_squared();
-
-    if speed_sq < 1e-4 {
-        return 0.0;
-    }
-
-    f32::exp(-friction / speed_sq.sqrt() * delta)
 }
 
 /// Factors controlling braking behavior in different directions.
