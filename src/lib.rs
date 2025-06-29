@@ -7,7 +7,7 @@ use bevy::{
 pub mod character;
 pub mod collide_and_slide;
 // pub mod debug;
-pub mod ground;
+pub mod grounding;
 pub mod movement;
 pub mod moving_platform;
 pub mod physics_interaction;
@@ -23,7 +23,7 @@ pub mod prelude {
             Projectile,
         },
         collide_and_slide::CollideAndSlideConfig,
-        ground::{Ground, Grounding, GroundingConfig},
+        grounding::{Ground, Grounding, GroundingConfig},
         movement::{
             CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement, MoveInput,
             MovementPlugin,

@@ -5,7 +5,7 @@ use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
     character::KinematicVelocity,
-    ground::{Grounding, GroundingConfig},
+    grounding::{Grounding, GroundingConfig},
     projection::align_with_surface,
 };
 

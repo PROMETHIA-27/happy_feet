@@ -7,7 +7,7 @@ use bevy::{
 };
 
 use crate::character::GroundLeave;
-use crate::{character::KinematicVelocity, ground::Grounding};
+use crate::{character::KinematicVelocity, grounding::Grounding};
 
 pub struct MovingPlatformPlugin {
     pub schedule: Interned<dyn ScheduleLabel>,
@@ -143,6 +143,7 @@ pub(crate) fn apply_inherited_velocity_on_ground_leave(
     let Ok((mut velocity, mut platform_velocity)) = query.get_mut(trigger.target()) else {
         return;
     };
+
     velocity.0 += mem::take(&mut platform_velocity.0);
 }
 

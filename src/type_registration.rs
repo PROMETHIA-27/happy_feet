@@ -1,6 +1,5 @@
 use crate::{
-    character, collide_and_slide, ground, movement, moving_platform, projection, stepping,
-    sweep,
+    character, collide_and_slide, grounding, movement, moving_platform, projection, stepping, sweep,
 };
 use bevy::prelude::*;
 
@@ -24,7 +23,12 @@ impl Plugin for CharacterTypeRegistrationPlugin {
             collide_and_slide::CollideAndSlideConfig,
             collide_and_slide::CollideAndSlideFilter,
         )>();
-        app.register_type::<(ground::Grounding, ground::Ground, ground::GroundingConfig)>();
+        app.register_type::<(
+            grounding::Grounding,
+            grounding::PreviousGrounding,
+            grounding::GroundingConfig,
+            grounding::Ground,
+        )>();
         app.register_type::<(
             movement::MoveInput,
             movement::CharacterMovement,

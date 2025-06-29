@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use bevy::{math::InvalidDirectionError, prelude::*};
 
-use crate::ground::is_walkable;
+use crate::grounding::is_walkable;
 
 #[derive(Reflect, Debug, Clone, Copy)]
 #[reflect(Debug, Clone)]
@@ -29,12 +29,12 @@ impl Surface {
         current_ground_normal: Option<Dir3>,
         up_direction: Dir3,
     ) -> Result<Dir3, InvalidDirectionError> {
-        if !self.is_walkable {
-            if let Some(ground_normal) = current_ground_normal {
-                // Calculate obstruction normal perpendicular to both ground normal and the up direction
-                let tangent = Dir3::new(ground_normal.cross(*self.normal))?;
-                return Dir3::new(tangent.cross(*up_direction));
-            }
+        if !self.is_walkable
+            && let Some(ground_normal) = current_ground_normal
+        {
+            // Calculate obstruction normal perpendicular to both ground normal and the up direction
+            let tangent = Dir3::new(ground_normal.cross(*self.normal))?;
+            return Dir3::new(tangent.cross(*up_direction));
         }
 
         Ok(self.normal)

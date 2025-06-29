@@ -1,7 +1,7 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{collide_and_slide::MovementState, prelude::CharacterHit};
+use crate::character::{CharacterHit, KinematicVelocity};
 
 pub struct PhysicsInteractionPlugin;
 
@@ -25,10 +25,10 @@ fn physics_interaction_on_hit(
         &ComputedAngularInertia,
         &ComputedCenterOfMass,
     )>,
-    mut movements: Query<(&mut MovementState, &ComputedMass)>,
+    mut characters: Query<(&mut KinematicVelocity, &ComputedMass)>,
     time: Res<Time>,
 ) {
-    let (mut movement, character_mass) = movements.get_mut(trigger.target()).unwrap();
+    let (mut character_velocity, character_mass) = characters.get_mut(trigger.target()).unwrap();
 
     let Ok((
         rb,
@@ -76,7 +76,7 @@ fn physics_interaction_on_hit(
 
     commands.entity(trigger.hit.entity).remove::<Sleeping>();
 
-    movement.velocity += trigger.hit.direction * trigger.hit.distance;
+    character_velocity.0 += trigger.hit.direction * trigger.hit.distance;
 }
 
 fn apply_acceleration_on_point(

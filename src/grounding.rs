@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::sweep::{SweepHitData, sweep_filtered};
 
 #[derive(Component, Reflect, Debug, Clone, Copy)]
-#[reflect(Component, Default)]
+#[reflect(Component, Default, Debug, Clone)]
 #[require(Grounding)]
 pub struct GroundingConfig {
     pub up_direction: Dir3,
@@ -28,9 +28,14 @@ impl Default for GroundingConfig {
     }
 }
 
+#[derive(Component, Reflect, Deref, Default, Debug, Clone, Copy)]
+#[reflect(Component, Default, Debug, Clone)]
+pub struct PreviousGrounding(pub(crate) Grounding);
+
 /// The ground state of a character.
 #[derive(Component, Reflect, Default, Debug, PartialEq, Clone, Copy)]
-#[reflect(Component, Default)]
+#[reflect(Component, Default, Debug, PartialEq, Clone)]
+#[require(PreviousGrounding)]
 pub struct Grounding {
     pub(crate) inner_ground: Option<Ground>,
     /// If the character should be forced to detach from the ground, e.g., after jumping.
@@ -96,6 +101,7 @@ impl From<Ground> for Grounding {
 
 /// Represents a surface that a character can stand on.
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
+#[reflect(Debug, PartialEq, Clone)]
 pub struct Ground {
     /// The surface normal vector, pointing outward from the surface.
     pub normal: Dir3,

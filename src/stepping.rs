@@ -1,9 +1,10 @@
-use crate::sweep::{SweepHitData, sweep, sweep_filtered};
 use avian3d::prelude::*;
 use bevy::{
     ecs::{component::HookContext, world::DeferredWorld},
     prelude::*,
 };
+
+use crate::sweep::{SweepHitData, sweep_filtered};
 
 const STEP_EPSILON: f32 = 1e-4;
 

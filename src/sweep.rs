@@ -19,34 +19,22 @@ pub(crate) fn sweep(
     direction: Dir3,
     max_distance: f32,
     skin_width: f32,
-    spatial_query: &SpatialQuery,
+    query_pipeline: &SpatialQueryPipeline,
     query_filter: &SpatialQueryFilter,
     ignore_origin_penetration: bool,
 ) -> Option<SweepHitData> {
-    let hit = spatial_query.cast_shape(
+    sweep_filtered(
         shape,
         origin,
         rotation,
         direction,
-        &ShapeCastConfig {
-            max_distance: max_distance + skin_width, // extend the trace slightly
-            target_distance: skin_width, // I'm not sure what this does, but I think this is correct ;)
-            ignore_origin_penetration,
-            ..Default::default()
-        },
+        max_distance,
+        skin_width,
+        query_pipeline,
         query_filter,
-    )?;
-
-    // How far is safe to translate by
-    // let distance = hit.distance - skin_width;
-    let distance = (hit.distance - skin_width).max(0.0);
-
-    Some(SweepHitData {
-        distance,
-        point: hit.point1,
-        normal: hit.normal1,
-        entity: hit.entity,
-    })
+        ignore_origin_penetration,
+        |_| true,
+    )
 }
 
 /// Returns the safe hit distance and the hit data from the spatial query for the first hit

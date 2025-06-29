@@ -4,7 +4,7 @@ use avian3d::prelude::*;
 use bevy::{ecs::relationship::RelationshipSourceCollection, prelude::*};
 
 use crate::{
-    ground::Ground,
+    grounding::Ground,
     projection::{CollisionState, Surface},
     sweep::{SweepHitData, sweep_filtered},
 };
@@ -120,8 +120,8 @@ pub enum CollisionResponse {
     Stop,
 }
 
-#[derive(Component, Reflect, Debug, Clone, Copy)]
-#[reflect(Component, Debug, Clone)]
+#[derive(Reflect, Debug, Clone, Copy)]
+#[reflect(Debug, Clone)]
 pub struct MovementState {
     pub velocity: Vec3,
     pub position: Vec3,
