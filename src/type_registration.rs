@@ -36,17 +36,14 @@ impl Plugin for CharacterTypeRegistrationPlugin {
             movement::CharacterFriction,
             movement::CharacterDrag,
             movement::FrictionScale,
+            movement::CharacterBounce,
         )>();
         app.register_type::<(
             moving_platform::PhysicsMover,
             moving_platform::InheritedVelocity,
         )>();
         app.register_type::<(projection::Surface, projection::CollisionState)>();
-        app.register_type::<(
-            stepping::SteppingBehaviour,
-            stepping::SteppingConfig,
-            stepping::StepOutput,
-        )>();
+        app.register_type::<(stepping::SteppingConfig, stepping::StepOutput)>();
         app.register_type::<sweep::SweepHitData>();
     }
 }

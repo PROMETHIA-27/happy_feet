@@ -131,7 +131,7 @@ fn process_movement(
         &CollideAndSlideFilter,
         &CollideAndSlideConfig,
         Option<(&mut Grounding, &GroundingConfig, &mut PreviousGrounding)>,
-        Option<(&SteppingConfig, &SteppingBehaviour)>,
+        Option<&SteppingConfig>,
     )>,
     rigid_bodies: Query<&RigidBody>,
     sensors: Query<Entity, With<Sensor>>,
@@ -186,11 +186,9 @@ fn process_movement(
             |movement, hit| {
                 // Stepping logic
                 if !hit.surface.is_walkable
-                    && let Some((
-                        (stepping_config, stepping_behaviour),
-                        (grounding, grounding_config, _),
-                    )) = stepping.zip(grounding.as_ref())
-                    && match stepping_behaviour {
+                    && let Some((stepping_config, (grounding, grounding_config, _))) =
+                        stepping.zip(grounding.as_ref())
+                    && match stepping_config.behaviour {
                         SteppingBehaviour::Never => false,
                         SteppingBehaviour::Grounded => grounding.is_grounded(),
                         SteppingBehaviour::Always => true,

@@ -25,8 +25,8 @@ pub mod prelude {
         collide_and_slide::CollideAndSlideConfig,
         grounding::{Ground, Grounding, GroundingConfig},
         movement::{
-            CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement, MoveInput,
-            MovementPlugin,
+            CharacterBounce, CharacterDrag, CharacterFriction, CharacterGravity, CharacterMovement,
+            MoveInput, MovementPlugin,
         },
         moving_platform::{InheritedVelocity, MovingPlatformPlugin, PhysicsMover},
         stepping::{SteppingBehaviour, SteppingConfig},

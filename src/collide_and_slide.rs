@@ -112,6 +112,12 @@ pub struct MovementHitData {
     pub surface: Surface,
 }
 
+impl MovementHitData {
+    pub fn normal(&self) -> Dir3 {
+        self.surface.normal
+    }
+}
+
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
 #[reflect(Debug, PartialEq, Clone)]
 pub enum CollisionResponse {

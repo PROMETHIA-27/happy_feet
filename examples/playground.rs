@@ -8,7 +8,7 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
-use happy_feet::{movement::jump, prelude::*};
+use happy_feet::{movement::BounceBehaviour, movement::jump, prelude::*};
 
 fn main() -> AppExit {
     App::new()
@@ -212,6 +212,10 @@ fn setup(
         (
             // Restitution::new(1.0),
             Character,
+            CharacterBounce {
+                restitution: 0.9,
+                behaviour: BounceBehaviour::Obstruction,
+            },
             // DebugMotion::default(),
             // DebugInput,
             CharacterMovement::DEFAULT_AIR,
@@ -220,9 +224,9 @@ fn setup(
             CharacterDrag::default(),
             SteppingConfig {
                 max_vertical: 0.4,
+                behaviour: SteppingBehaviour::Always,
                 ..Default::default()
             },
-            SteppingBehaviour::Always,
             GroundingConfig {
                 max_angle: PI / 4.0 + 0.1,
                 max_distance: 0.2,

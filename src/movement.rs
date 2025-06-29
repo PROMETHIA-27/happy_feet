@@ -4,7 +4,7 @@ use avian3d::prelude::*;
 use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
-    character::KinematicVelocity,
+    character::{CharacterHit, KinematicVelocity},
     grounding::{Grounding, GroundingConfig},
     projection::align_with_surface,
 };
@@ -26,6 +26,8 @@ impl Plugin for MovementPlugin {
                 .in_set(PhysicsStepSet::First)
                 .chain(),
         );
+
+        app.add_observer(bounce_on_character_hit);
     }
 }
 
@@ -145,6 +147,36 @@ pub(crate) fn character_acceleration(
     }
 }
 
+pub(crate) fn bounce_on_character_hit(
+    trigger: Trigger<CharacterHit>,
+    mut query: Query<(
+        &mut KinematicVelocity,
+        &CharacterBounce,
+        Option<&mut Grounding>,
+    )>,
+) {
+    let Ok((mut velocity, bounce, grounding)) = query.get_mut(trigger.target()) else {
+        return;
+    };
+
+    match bounce.behaviour {
+        BounceBehaviour::Never => return,
+        BounceBehaviour::Ground if !trigger.hit.surface.is_walkable => return,
+        BounceBehaviour::Obstruction if trigger.hit.surface.is_walkable => return,
+        _ => {}
+    }
+
+    let bounce_impulse = -trigger.velocity.dot(*trigger.hit.surface.normal) * bounce.restitution;
+
+    velocity.0 += *trigger.hit.surface.normal * bounce_impulse;
+
+    if bounce_impulse > 0.1
+        && let Some(mut grounding) = grounding
+    {
+        grounding.detach();
+    }
+}
+
 /// Used for moving a character based on it's [`MoveInput`].
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
@@ -185,14 +217,14 @@ impl CharacterGravity {
 }
 
 /// The friction scale when a character walks on an entity.
-#[derive(Component, Reflect, Default, Debug, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[reflect(Component, Default, Debug, Clone)]
 pub struct FrictionScale(pub f32);
 
 /// The friction applied to [`KinematicVelocity`] when a character is grounded.
 /// Multiplied by the [`FrictionScale`] of the ground entity.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct CharacterFriction(pub f32);
 
@@ -220,6 +252,32 @@ impl Default for CharacterDrag {
 
 impl CharacterDrag {
     pub const ZERO: Self = Self(0.0);
+}
+
+#[derive(Reflect, Default, Debug, Clone)]
+#[reflect(Debug, Default, Clone)]
+pub enum BounceBehaviour {
+    Always,
+    Ground,
+    #[default]
+    Obstruction,
+    Never,
+}
+
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
+pub struct CharacterBounce {
+    pub restitution: f32,
+    pub behaviour: BounceBehaviour,
+}
+
+impl Default for CharacterBounce {
+    fn default() -> Self {
+        Self {
+            restitution: 0.9,
+            behaviour: Default::default(),
+        }
+    }
 }
 
 /// The desired movement direction of a character.

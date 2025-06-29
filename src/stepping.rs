@@ -213,10 +213,8 @@ fn step_forward(
 }
 
 /// Determines when the character should attempt to step up.
-// TODO: inserting this won't automatically insert `SteppingConfig`
-#[derive(Component, Reflect, Default, Debug, PartialEq, Eq, Clone, Copy)]
-#[reflect(Component, Default, Debug, Clone)]
-#[require(SteppingConfig)]
+#[derive(Reflect, Default, Debug, PartialEq, Eq, Clone, Copy)]
+#[reflect(Default, Debug, PartialEq, Clone)]
 pub enum SteppingBehaviour {
     Never,
     #[default]
@@ -226,27 +224,18 @@ pub enum SteppingBehaviour {
 
 /// Configure stepping for a character.
 #[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
-#[reflect(Component, Default)]
-#[component(on_insert = Self::on_insert)]
+#[reflect(Component, Default, PartialEq, Clone)]
 pub struct SteppingConfig {
     pub max_vertical: f32,
     pub max_horizontal: f32,
     pub max_iterations: usize,
-}
-
-impl SteppingConfig {
-    fn on_insert(mut world: DeferredWorld, ctx: HookContext) {
-        // Work around to avoid "required component recursion"
-        world
-            .commands()
-            .entity(ctx.entity)
-            .insert(SteppingBehaviour::default());
-    }
+    pub behaviour: SteppingBehaviour,
 }
 
 impl Default for SteppingConfig {
     fn default() -> Self {
         Self {
+            behaviour: Default::default(),
             max_vertical: 0.25,
             max_horizontal: 0.4,
             max_iterations: 8,
