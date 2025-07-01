@@ -9,12 +9,9 @@ impl Plugin for CharacterTypeRegistrationPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<(
             character::Character,
-            character::Projectile,
             character::KinematicVelocity,
             character::OnHit,
             character::OnStep,
-            character::OnGroundEnter,
-            character::OnGroundLeave,
         )>();
         app.register_type::<(
             collide_and_slide::MovementState,
@@ -28,6 +25,8 @@ impl Plugin for CharacterTypeRegistrationPlugin {
             grounding::PreviousGrounding,
             grounding::GroundingConfig,
             grounding::Ground,
+            grounding::OnGroundEnter,
+            grounding::OnGroundLeave,
         )>();
         app.register_type::<(
             movement::MoveInput,

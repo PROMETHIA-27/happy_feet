@@ -1,5 +1,4 @@
 use avian3d::prelude::*;
-use bevy::color::palettes::css::*;
 use bevy::prelude::*;
 
 use crate::{
@@ -7,15 +6,16 @@ use crate::{
         CollideAndSlideConfig, CollideAndSlideFilter, CollideAndSlidePlugin, CollisionResponse,
         MovementHitData, MovementState, collide_and_slide,
     },
-    grounding::{Ground, Grounding, GroundingConfig, PreviousGrounding, ground_check, is_walkable},
+    grounding::{
+        Ground, Grounding, GroundingConfig, OnGroundEnter, PreviousGrounding, ground_check,
+        is_walkable,
+    },
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
     sweep::{SweepHitData, sweep},
 };
-
 // TODO:
-// - the grounding stuff should be in grounding.rs
 // - depenetrate should be in depenetrate.rs
 
 fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
@@ -39,13 +39,7 @@ impl Plugin for CharacterPlugin {
 
         app.add_systems(
             PhysicsSchedule,
-            (
-                depenetrate,
-                update_query_pipeline,
-                process_movement,
-                detect_ground,
-                trigger_grounding_events,
-            )
+            (depenetrate, update_query_pipeline, process_movement)
                 .chain()
                 .in_set(CharacterSystems),
         );
@@ -59,19 +53,6 @@ impl Plugin for CharacterPlugin {
     }
 }
 
-/// A marker component for setting up basic projectile movement.
-///
-/// Provides collide-and-slide physics behavior, using [`KinematicVelocity`] for movement
-/// and handling collisions with obstacles.
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug, Clone)]
-#[require(
-    RigidBody = RigidBody::Kinematic,
-    KinematicVelocity,
-    CollideAndSlideConfig,
-)]
-pub struct Projectile;
-
 /// A marker component for setting up character movement.
 ///
 /// Similar to [`Projectile`] but adds grounding logic that modifies how velocity is projected
@@ -83,18 +64,18 @@ pub struct Projectile;
     RigidBody = RigidBody::Kinematic,
     KinematicVelocity,
     InheritedVelocity,
-    CollideAndSlideConfig,
     GroundingConfig,
     SteppingConfig,
 )]
 pub struct Character;
 
-/// The velocity of a character.
+/// The velocity of a kinematic body that is moved using collide-and-slide.
 #[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
+#[require(CollideAndSlideConfig)]
 pub struct KinematicVelocity(pub Vec3);
 
-/// Event that is triggered when a character or projectile collides with an obstacle during movement.
+/// Event that is triggered when a character collides with an obstacle during movement.
 #[derive(Event, Reflect)]
 pub struct OnHit {
     /// The velocity of the entity at the moment of impact
@@ -114,19 +95,6 @@ pub struct OnStep {
     pub offset: Vec3,
     pub hit: SweepHitData,
 }
-
-/// Triggered when the character becomes grounded during a movement update.
-///
-/// This is only triggered for the last ground the character touched during the update and will not be triggered
-/// if the character was already grounded prior to the start of the update.
-#[derive(Event, Reflect, Deref)]
-pub struct OnGroundEnter(pub Ground);
-
-/// Triggered when the character becomes ungrounded during a movement update.
-///
-/// This is only triggered if the character is ungrounded at the end of the update.
-#[derive(Event, Reflect, Deref)]
-pub struct OnGroundLeave(pub Ground);
 
 // TODO: is this necessary?
 fn update_query_pipeline(mut spatial_query: SpatialQuery) {
@@ -148,6 +116,7 @@ fn process_movement(
         &CollideAndSlideConfig,
         Option<(&mut Grounding, &GroundingConfig, &mut PreviousGrounding)>,
         Option<&SteppingConfig>,
+        Has<CollisionEventsEnabled>,
     )>,
     rigid_bodies: Query<&RigidBody>,
     sensors: Query<Entity, With<Sensor>>,
@@ -165,6 +134,7 @@ fn process_movement(
         config,
         grounding,
         stepping,
+        collision_events_enabled,
     ) in &mut query
     {
         let is_grounded = grounding.as_ref().is_some_and(|(g, ..)| g.is_grounded());
@@ -280,14 +250,17 @@ fn process_movement(
                     }
                 }
 
+                // Trigger hit event
                 commands.entity(entity).trigger(OnHit {
                     hit,
                     velocity: movement.velocity,
                 });
 
                 // Write collision events
-                collision_started_events.write(CollisionStarted(entity, hit.entity));
-                collision_ended_events.write(CollisionEnded(entity, hit.entity)); // Assume the collision is ended immediately
+                if collision_events_enabled {
+                    collision_started_events.write(CollisionStarted(entity, hit.entity));
+                    collision_ended_events.write(CollisionEnded(entity, hit.entity)); // Assume the collision is ended immediately
+                }
 
                 CollisionResponse::Slide
             },
@@ -300,123 +273,12 @@ fn process_movement(
         );
 
         // Apply movement
-
         position.0 = movement.position;
         velocity.0 = movement.velocity;
 
         if let Some((mut grounding, _, mut previous_grounding)) = grounding {
             previous_grounding.0 = *grounding;
             *grounding = Grounding::new(movement.ground);
-        }
-    }
-}
-
-fn detect_ground(
-    // mut gizmos: Gizmos,
-    query_pipeline: Res<SpatialQueryPipeline>,
-    mut query: Query<(
-        &mut Position,
-        &Rotation,
-        &PreviousGrounding,
-        &mut Grounding,
-        &GroundingConfig,
-        &Collider,
-        &CollideAndSlideConfig,
-        &CollideAndSlideFilter,
-    )>,
-    sensors: Query<Entity, With<Sensor>>,
-) {
-    for (
-        mut position,
-        rotation,
-        previous_grounding,
-        mut grounding,
-        grounding_config,
-        collider,
-        config,
-        filter,
-    ) in &mut query
-    {
-        if !previous_grounding.is_grounded() && !grounding.is_grounded() {
-            continue;
-        }
-
-        // Ignore sensors
-        let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
-
-        grounding.inner_ground = None;
-
-        // Check for ground
-        let Some((surface, hit)) = ground_check(
-            collider,
-            position.0,
-            rotation.0,
-            grounding_config.up_direction,
-            grounding_config.max_distance,
-            config.skin_width,
-            grounding_config.max_angle,
-            &query_pipeline,
-            &filter.0,
-            filter_hits,
-        ) else {
-            continue;
-        };
-
-        // let color = match surface.is_walkable {
-        //     true => LIGHT_GREEN,
-        //     false => CRIMSON,
-        // };
-        //
-        // gizmos.line(hit.point, hit.point + hit.normal * 0.2, color);
-        // gizmos.line(
-        //     hit.point + hit.normal * 0.2,
-        //     hit.point + hit.normal * 0.2 + surface.normal * 0.2,
-        //     color,
-        // );
-
-        let ground = if surface.is_walkable {
-            Ground::new(hit.entity, hit.normal)
-        } else {
-            continue;
-        };
-
-        // Snap to the ground
-        if grounding_config.snap_to_surface
-            && hit.distance > 0.0
-            && sweep(
-                collider,
-                position.0,
-                rotation.0,
-                grounding_config.up_direction,
-                -hit.distance,
-                config.skin_width,
-                &query_pipeline,
-                &filter.0,
-                true,
-                filter_hits,
-            )
-            .is_none()
-        {
-            position.0 -= grounding_config.up_direction * hit.distance;
-        }
-
-        grounding.inner_ground = Some(ground);
-    }
-}
-
-fn trigger_grounding_events(
-    mut query: Query<(Entity, &Grounding, &PreviousGrounding)>,
-    mut commands: Commands,
-) {
-    for (entity, grounding, previous_grounding) in &mut query {
-        match (previous_grounding.inner_ground, grounding.inner_ground) {
-            (Some(ground), None) => {
-                commands.entity(entity).trigger(OnGroundLeave(ground));
-            }
-            (None, Some(ground)) => {
-                commands.entity(entity).trigger(OnGroundEnter(ground));
-            }
-            _ => {}
         }
     }
 }

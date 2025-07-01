@@ -18,14 +18,12 @@ pub mod sweep;
 pub mod prelude {
     pub use crate::{
         CharacterPlugins,
-        character::{
-            Character, KinematicVelocity, OnGroundEnter, OnGroundLeave, OnHit, OnStep, Projectile,
-        },
+        character::{Character, KinematicVelocity, OnHit, OnStep},
         collide_and_slide::CollideAndSlideConfig,
-        grounding::{Ground, Grounding, GroundingConfig},
+        grounding::{Ground, Grounding, GroundingConfig, OnGroundEnter, OnGroundLeave},
         movement::{
-            BrakeFactor, CharacterBounce, CharacterDrag, GroundFriction, CharacterGravity,
-            CharacterMovement, MoveInput, MovementPlugin,
+            BrakeFactor, CharacterBounce, CharacterDrag, CharacterGravity, CharacterMovement,
+            GroundFriction, MoveInput, MovementPlugin,
         },
         moving_platform::{InheritedVelocity, MovingPlatformPlugin, PhysicsMover},
         stepping::{SteppingBehaviour, SteppingConfig},
@@ -56,8 +54,8 @@ impl PluginGroup for CharacterPlugins {
     fn build(self) -> PluginGroupBuilder {
         use crate::{
             character::CharacterPlugin, collide_and_slide::CollideAndSlidePlugin,
-            movement::MovementPlugin, moving_platform::MovingPlatformPlugin,
-            physics_interaction::PhysicsInteractionPlugin,
+            grounding::GroundingPlugin, movement::MovementPlugin,
+            moving_platform::MovingPlatformPlugin, physics_interaction::PhysicsInteractionPlugin,
             type_registration::CharacterTypeRegistrationPlugin,
         };
 
@@ -65,6 +63,7 @@ impl PluginGroup for CharacterPlugins {
             .add(CharacterTypeRegistrationPlugin)
             .add(CollideAndSlidePlugin)
             .add(CharacterPlugin)
+            .add(GroundingPlugin)
             .add(MovingPlatformPlugin::new(self.schedule))
             .add(PhysicsInteractionPlugin)
             .add(MovementPlugin)

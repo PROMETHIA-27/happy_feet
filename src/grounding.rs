@@ -4,9 +4,156 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
+    character::CharacterSystems,
+    collide_and_slide::{CollideAndSlideConfig, CollideAndSlideFilter},
     projection::Surface,
     sweep::{SweepHitData, sweep},
 };
+
+#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct GroundingSystems;
+
+pub struct GroundingPlugin;
+
+impl Plugin for GroundingPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            PhysicsSchedule,
+            GroundingSystems
+                .after(CharacterSystems)
+                .in_set(NarrowPhaseSet::Last),
+        );
+        app.add_systems(
+            PhysicsSchedule,
+            (detect_ground, trigger_grounding_events)
+                .chain()
+                .in_set(GroundingSystems),
+        );
+    }
+}
+
+/// Triggered when the character becomes grounded during a movement update.
+///
+/// This is only triggered for the last ground the character touched during the update and will not be triggered
+/// if the character was already grounded prior to the start of the update.
+#[derive(Event, Reflect, Deref)]
+pub struct OnGroundEnter(pub Ground);
+
+/// Triggered when the character becomes ungrounded during a movement update.
+///
+/// This is only triggered if the character is ungrounded at the end of the update.
+#[derive(Event, Reflect, Deref)]
+pub struct OnGroundLeave(pub Ground);
+
+fn detect_ground(
+    // mut gizmos: Gizmos,
+    query_pipeline: Res<SpatialQueryPipeline>,
+    mut query: Query<(
+        &mut Position,
+        &Rotation,
+        &PreviousGrounding,
+        &mut Grounding,
+        &GroundingConfig,
+        &Collider,
+        &CollideAndSlideConfig,
+        &CollideAndSlideFilter,
+    )>,
+    sensors: Query<Entity, With<Sensor>>,
+) {
+    for (
+        mut position,
+        rotation,
+        previous_grounding,
+        mut grounding,
+        grounding_config,
+        collider,
+        config,
+        filter,
+    ) in &mut query
+    {
+        if !previous_grounding.is_grounded() && !grounding.is_grounded() {
+            continue;
+        }
+
+        // Ignore sensors
+        let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
+
+        grounding.inner_ground = None;
+
+        // Check for ground
+        let Some((surface, hit)) = ground_check(
+            collider,
+            position.0,
+            rotation.0,
+            grounding_config.up_direction,
+            grounding_config.max_distance,
+            config.skin_width,
+            grounding_config.max_angle,
+            &query_pipeline,
+            &filter.0,
+            filter_hits,
+        ) else {
+            continue;
+        };
+
+        // let color = match surface.is_walkable {
+        //     true => LIGHT_GREEN,
+        //     false => CRIMSON,
+        // };
+        //
+        // gizmos.line(hit.point, hit.point + hit.normal * 0.2, color);
+        // gizmos.line(
+        //     hit.point + hit.normal * 0.2,
+        //     hit.point + hit.normal * 0.2 + surface.normal * 0.2,
+        //     color,
+        // );
+
+        let ground = if surface.is_walkable {
+            Ground::new(hit.entity, hit.normal)
+        } else {
+            continue;
+        };
+
+        // Snap to the ground
+        if grounding_config.snap_to_surface
+            && hit.distance > 0.0
+            && sweep(
+                collider,
+                position.0,
+                rotation.0,
+                grounding_config.up_direction,
+                -hit.distance,
+                config.skin_width,
+                &query_pipeline,
+                &filter.0,
+                true,
+                filter_hits,
+            )
+            .is_none()
+        {
+            position.0 -= grounding_config.up_direction * hit.distance;
+        }
+
+        grounding.inner_ground = Some(ground);
+    }
+}
+
+fn trigger_grounding_events(
+    mut query: Query<(Entity, &Grounding, &PreviousGrounding)>,
+    mut commands: Commands,
+) {
+    for (entity, grounding, previous_grounding) in &mut query {
+        match (previous_grounding.inner_ground, grounding.inner_ground) {
+            (Some(ground), None) => {
+                commands.entity(entity).trigger(OnGroundLeave(ground));
+            }
+            (None, Some(ground)) => {
+                commands.entity(entity).trigger(OnGroundEnter(ground));
+            }
+            _ => {}
+        }
+    }
+}
 
 /// Configuration parameters for character grounding behavior.
 #[derive(Component, Reflect, Debug, Clone, Copy)]

@@ -7,8 +7,8 @@ use bevy::{
 };
 
 use crate::{
-    character::{KinematicVelocity, OnGroundLeave},
-    grounding::Grounding,
+    character::KinematicVelocity,
+    grounding::{Grounding, OnGroundLeave},
 };
 
 pub struct MovingPlatformPlugin {
