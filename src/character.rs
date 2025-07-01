@@ -3,18 +3,19 @@ use bevy::prelude::*;
 
 use crate::{
     collide_and_slide::{
-        CollideAndSlideConfig, CollideAndSlideFilter, CollideAndSlidePlugin, CollisionResponse,
-        MovementHitData, MovementState, collide_and_slide,
+        CollideAndSlideConfig, CollideAndSlideFilter, CollisionResponse, MovementHitData,
+        MovementState, add_to_filter_on_insert_collider, collide_and_slide,
+        init_filter_mask_on_insert_collision_layers, remove_from_filter_on_replace_collider,
     },
     grounding::{
-        Ground, Grounding, GroundingConfig, OnGroundEnter, PreviousGrounding, ground_check,
-        is_walkable,
+        Ground, Grounding, GroundingConfig, OnGroundEnter, PreviousGrounding, is_walkable,
     },
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
-    sweep::{SweepHitData, sweep},
+    sweep::{SweepHitData},
 };
+
 // TODO:
 // - depenetrate should be in depenetrate.rs
 
@@ -28,6 +29,7 @@ fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct CharacterSystems;
 
+// TODO: the name is misleading since it supports moving other things as well
 pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
@@ -37,6 +39,10 @@ impl Plugin for CharacterPlugin {
             CharacterSystems.in_set(NarrowPhaseSet::Last),
         );
 
+        app.add_observer(init_filter_mask_on_insert_collision_layers);
+        app.add_observer(add_to_filter_on_insert_collider);
+        app.add_observer(remove_from_filter_on_replace_collider);
+
         app.add_systems(
             PhysicsSchedule,
             (depenetrate, update_query_pipeline, process_movement)
@@ -44,21 +50,10 @@ impl Plugin for CharacterPlugin {
                 .in_set(CharacterSystems),
         );
     }
-
-    fn finish(&self, app: &mut App) {
-        // Requires the CollideAndSlidePlugin to function
-        if !app.is_plugin_added::<CollideAndSlidePlugin>() {
-            app.add_plugins(CollideAndSlidePlugin);
-        }
-    }
 }
 
-/// A marker component for setting up character movement.
-///
-/// Similar to [`Projectile`] but adds grounding logic that modifies how velocity is projected
-/// when sliding on surfaces. This enables behaviors like walking up slopes and stepping over
-/// small obstacles while maintaining proper ground contact.
-#[derive(Component, Reflect, Default, Debug, Clone)]
+/// A component for setting up character movement with grounding and stepping behavior.
+#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(
     RigidBody = RigidBody::Kinematic,

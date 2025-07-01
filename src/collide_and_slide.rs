@@ -9,16 +9,6 @@ use crate::{
     sweep::{SweepHitData, sweep},
 };
 
-pub struct CollideAndSlidePlugin;
-
-impl Plugin for CollideAndSlidePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_observer(init_filter_mask_on_insert_collision_layers);
-        app.add_observer(add_to_filter_on_insert_collider);
-        app.add_observer(remove_from_filter_on_replace_collider);
-    }
-}
-
 pub fn collide_and_slide(
     state: &mut MovementState,
     shape: &Collider,
@@ -149,7 +139,7 @@ impl MovementState {
     }
 }
 
-// Maybe this should be a resource rather than a component?
+// TODO: Maybe this should be a resource rather than a component? Or both?
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(CollideAndSlideFilter)]
@@ -172,7 +162,7 @@ impl Default for CollideAndSlideConfig {
 #[reflect(Component)]
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 
-fn init_filter_mask_on_insert_collision_layers(
+pub(crate) fn init_filter_mask_on_insert_collision_layers(
     trigger: Trigger<OnInsert, CollisionLayers>,
     mut rigid_bodies: Query<(&mut CollideAndSlideFilter, &CollisionLayers)>,
 ) {
@@ -183,7 +173,7 @@ fn init_filter_mask_on_insert_collision_layers(
     filter.0.mask = layers.filters;
 }
 
-fn add_to_filter_on_insert_collider(
+pub(crate) fn add_to_filter_on_insert_collider(
     trigger: Trigger<OnInsert, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,
@@ -197,7 +187,7 @@ fn add_to_filter_on_insert_collider(
     filters.0.excluded_entities.insert(trigger.target());
 }
 
-fn remove_from_filter_on_replace_collider(
+pub(crate) fn remove_from_filter_on_replace_collider(
     trigger: Trigger<OnReplace, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,

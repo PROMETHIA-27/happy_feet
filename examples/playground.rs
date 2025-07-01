@@ -11,7 +11,7 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
-use happy_feet::{movement::BounceBehaviour, movement::jump, prelude::*};
+use happy_feet::{movement::jump, prelude::*};
 
 fn main() -> AppExit {
     App::new()

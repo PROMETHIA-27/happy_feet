@@ -23,9 +23,9 @@ pub mod prelude {
         grounding::{Ground, Grounding, GroundingConfig, OnGroundEnter, OnGroundLeave},
         movement::{
             BrakeFactor, CharacterBounce, CharacterDrag, CharacterGravity, CharacterMovement,
-            GroundFriction, MoveInput, MovementPlugin,
+            GroundFriction, MoveInput,
         },
-        moving_platform::{InheritedVelocity, MovingPlatformPlugin, PhysicsMover},
+        moving_platform::PhysicsMover,
         stepping::{SteppingBehaviour, SteppingConfig},
     };
 }
@@ -53,15 +53,13 @@ impl CharacterPlugins {
 impl PluginGroup for CharacterPlugins {
     fn build(self) -> PluginGroupBuilder {
         use crate::{
-            character::CharacterPlugin, collide_and_slide::CollideAndSlidePlugin,
-            grounding::GroundingPlugin, movement::MovementPlugin,
+            character::CharacterPlugin, grounding::GroundingPlugin, movement::MovementPlugin,
             moving_platform::MovingPlatformPlugin, physics_interaction::PhysicsInteractionPlugin,
             type_registration::CharacterTypeRegistrationPlugin,
         };
 
         PluginGroupBuilder::start::<Self>()
             .add(CharacterTypeRegistrationPlugin)
-            .add(CollideAndSlidePlugin)
             .add(CharacterPlugin)
             .add(GroundingPlugin)
             .add(MovingPlatformPlugin::new(self.schedule))
