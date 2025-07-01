@@ -63,6 +63,12 @@ impl Plugin for CharacterPlugin {
 )]
 pub struct Character;
 
+/// The actual movement during the last collide-and-slide update.
+#[derive(Component, Reflect, Deref, Debug, Default, Clone, Copy)]
+#[reflect(Component, Debug, Default, Clone)]
+#[component(immutable)]
+pub struct LastUpdateVelocity(pub Vec3);
+
 /// The velocity of a kinematic body that is moved using collide-and-slide.
 #[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
@@ -265,6 +271,10 @@ fn process_movement(
                 None => velocity.reject_from(*surface.normal),
             },
         );
+
+        commands.entity(entity).insert(LastUpdateVelocity(
+            (movement.position - position.0) / time.delta_secs(),
+        ));
 
         // Apply movement
         position.0 = movement.position;
