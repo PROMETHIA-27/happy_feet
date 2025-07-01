@@ -10,37 +10,10 @@ pub struct SweepHitData {
     pub entity: Entity,
 }
 
-/// Returns the safe hit distance and the hit data from the spatial query.
-#[must_use]
-pub(crate) fn sweep(
-    shape: &Collider,
-    origin: Vec3,
-    rotation: Quat,
-    direction: Dir3,
-    max_distance: f32,
-    skin_width: f32,
-    query_pipeline: &SpatialQueryPipeline,
-    query_filter: &SpatialQueryFilter,
-    ignore_origin_penetration: bool,
-) -> Option<SweepHitData> {
-    sweep_filtered(
-        shape,
-        origin,
-        rotation,
-        direction,
-        max_distance,
-        skin_width,
-        query_pipeline,
-        query_filter,
-        ignore_origin_penetration,
-        |_| true,
-    )
-}
-
 /// Returns the safe hit distance and the hit data from the spatial query for the first hit
 /// where `f` returns `true`.
 #[must_use]
-pub(crate) fn sweep_filtered(
+pub(crate) fn sweep(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,

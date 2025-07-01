@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::color::palettes::css::*;
 use bevy::prelude::*;
 
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
-    sweep::{SweepHitData, sweep_filtered},
+    sweep::{SweepHitData, sweep},
 };
 
 // TODO:
@@ -134,6 +135,7 @@ fn update_query_pipeline(mut spatial_query: SpatialQuery) {
 
 #[allow(clippy::type_complexity)]
 fn process_movement(
+    // mut gizmos: Gizmos,
     query_pipeline: Res<SpatialQueryPipeline>,
     mut commands: Commands,
     mut query: Query<(
@@ -231,17 +233,23 @@ fn process_movement(
                             &filter.0,
                             filter_hits,
                             |hit| {
-                                if is_walkable(
+                                // Only step on walkable surfaces
+                                if !is_walkable(
                                     hit.normal,
                                     grounding_config.max_angle - 0.01,
                                     *grounding_config.up_direction,
-                                ) && let Ok(rb) = rigid_bodies.get(hit.entity)
-                                    && !rb.is_dynamic()
-                                {
-                                    true
-                                } else {
-                                    false
+                                ) {
+                                    return false;
                                 }
+
+                                // Stepping on dynamic bodies is a bit buggy right now
+                                if let Ok(rb) = rigid_bodies.get(hit.entity)
+                                    && rb.is_dynamic()
+                                {
+                                    return false;
+                                }
+
+                                true
                             },
                         )
                     {
@@ -304,11 +312,11 @@ fn process_movement(
 }
 
 fn detect_ground(
+    // mut gizmos: Gizmos,
     query_pipeline: Res<SpatialQueryPipeline>,
     mut query: Query<(
         &mut Position,
         &Rotation,
-        &KinematicVelocity,
         &PreviousGrounding,
         &mut Grounding,
         &GroundingConfig,
@@ -321,7 +329,6 @@ fn detect_ground(
     for (
         mut position,
         rotation,
-        velocity,
         previous_grounding,
         mut grounding,
         grounding_config,
@@ -337,12 +344,13 @@ fn detect_ground(
         // Ignore sensors
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
 
+        grounding.inner_ground = None;
+
         // Check for ground
-        let Some((ground, hit)) = ground_check(
+        let Some((surface, hit)) = ground_check(
             collider,
             position.0,
             rotation.0,
-            Dir3::new(velocity.0).ok(),
             grounding_config.up_direction,
             grounding_config.max_distance,
             config.skin_width,
@@ -351,25 +359,42 @@ fn detect_ground(
             &filter.0,
             filter_hits,
         ) else {
-            grounding.inner_ground = None;
+            continue;
+        };
+
+        // let color = match surface.is_walkable {
+        //     true => LIGHT_GREEN,
+        //     false => CRIMSON,
+        // };
+        //
+        // gizmos.line(hit.point, hit.point + hit.normal * 0.2, color);
+        // gizmos.line(
+        //     hit.point + hit.normal * 0.2,
+        //     hit.point + hit.normal * 0.2 + surface.normal * 0.2,
+        //     color,
+        // );
+
+        let ground = if surface.is_walkable {
+            Ground::new(hit.entity, hit.normal)
+        } else {
             continue;
         };
 
         // Snap to the ground
         if grounding_config.snap_to_surface
-            // && hit.distance > 0.0
-            && sweep_filtered(
-            collider,
-            position.0,
-            rotation.0,
-            grounding_config.up_direction,
-            -hit.distance,
-            config.skin_width,
-            &query_pipeline,
-            &filter.0,
-            true,
-            filter_hits,
-        )
+            && hit.distance > 0.0
+            && sweep(
+                collider,
+                position.0,
+                rotation.0,
+                grounding_config.up_direction,
+                -hit.distance,
+                config.skin_width,
+                &query_pipeline,
+                &filter.0,
+                true,
+                filter_hits,
+            )
             .is_none()
         {
             position.0 -= grounding_config.up_direction * hit.distance;

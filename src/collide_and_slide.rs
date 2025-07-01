@@ -6,7 +6,7 @@ use bevy::{ecs::relationship::RelationshipSourceCollection, prelude::*};
 use crate::{
     grounding::Ground,
     projection::{CollisionState, Surface},
-    sweep::{SweepHitData, sweep_filtered},
+    sweep::{SweepHitData, sweep},
 };
 
 pub struct CollideAndSlidePlugin;
@@ -44,7 +44,7 @@ pub fn collide_and_slide(
         let origin = state.position;
 
         let mut surface = None;
-        let Some(hit) = sweep_filtered(
+        let Some(hit) = sweep(
             shape,
             origin,
             rotation,
@@ -58,23 +58,26 @@ pub fn collide_and_slide(
                 surface = get_surface(hit);
                 surface.is_some()
             },
-        ) else {
+        )
+        .map(|hit| SweepHitData {
+            // Clamping the distance has its own downsides, but it generally behaves nicer
+            distance: hit.distance.max(0.0),
+            ..hit
+        }) else {
             state.position += direction * max_distance;
             break;
         };
 
         let surface = surface.unwrap();
 
-        let distance = hit.distance.max(0.0); // ??
-
-        state.remaining_time *= 1.0 - distance / max_distance;
-        state.position += direction * distance;
+        state.remaining_time *= 1.0 - hit.distance / max_distance;
+        state.position += direction * hit.distance;
 
         let impact = MovementHitData {
             origin,
             direction,
             max_distance,
-            distance,
+            distance: hit.distance,
             entity: hit.entity,
             point: hit.point,
             surface,
@@ -159,7 +162,7 @@ impl Default for CollideAndSlideConfig {
     fn default() -> Self {
         Self {
             max_iterations: 4,
-            skin_width: 0.1,
+            skin_width: 0.02,
         }
     }
 }

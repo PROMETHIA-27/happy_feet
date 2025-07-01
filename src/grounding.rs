@@ -3,7 +3,10 @@ use std::{f32::consts::PI, fmt::Debug};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::sweep::{SweepHitData, sweep_filtered};
+use crate::{
+    projection::Surface,
+    sweep::{SweepHitData, sweep},
+};
 
 /// Configuration parameters for character grounding behavior.
 #[derive(Component, Reflect, Debug, Clone, Copy)]
@@ -190,85 +193,110 @@ pub(crate) fn ground_check(
     collider: &Collider,
     translation: Vec3,
     rotation: Quat,
-    forward: Option<Dir3>,
-    up: Dir3,
+    up_direction: Dir3,
     max_distance: f32,
     skin_width: f32,
     walkable_angle: f32,
     query_pipeline: &SpatialQueryPipeline,
     query_filter: &SpatialQueryFilter,
-    filter_hits: impl FnMut(&SweepHitData) -> bool,
-) -> Option<(Ground, SweepHitData)> {
-    let hit = sweep_filtered(
+    mut filter_hits: impl FnMut(&SweepHitData) -> bool,
+) -> Option<(Surface, SweepHitData)> {
+    let hit = sweep(
         collider,
         translation,
         rotation,
-        -up,
+        -up_direction,
         max_distance,
         skin_width,
         query_pipeline,
         query_filter,
         true,
-        filter_hits,
+        |hit| filter_hits(hit),
     )?;
 
-    if is_walkable(hit.normal, walkable_angle, *up) {
-        return Some((Ground::new(hit.entity, hit.normal), hit));
-    }
+    let mut normal = hit.normal;
 
-    if let Some(ray_hit) = forward
-        .and_then(|forward| {
-            ground_rays(
-                hit.point,
-                forward,
-                up,
-                skin_width,
-                query_filter,
-                query_pipeline,
-            )
-        })
-        .filter(|h| is_walkable(h.normal, walkable_angle, *up))
+    if let Some(ray_hit) = ground_surface_rays(
+        hit.point,
+        hit.normal,
+        up_direction,
+        0.01,
+        query_pipeline,
+        query_filter,
+        |sweep| filter_hits(sweep),
+    ) && ray_hit.normal.dot(*up_direction) > hit.normal.dot(*up_direction)
     {
-        return Some((Ground::new(ray_hit.entity, ray_hit.normal), hit));
+        normal = ray_hit.normal;
     }
 
-    None
+    Some((Surface::new(normal, walkable_angle, up_direction), hit))
 }
 
-// TODO: thjis is fucl
-pub(crate) fn ground_rays(
-    origin: Vec3,
-    forward: Dir3,
-    up: Dir3,
-    distance: f32,
-    filter: &SpatialQueryFilter,
+/// Attempt to retrieve better surface normal using ray casts.
+pub(crate) fn ground_surface_rays(
+    point: Vec3,
+    normal: Vec3,
+    up_direction: Dir3,
+    epsilon: f32,
     query_pipeline: &SpatialQueryPipeline,
-) -> Option<RayHitData> {
-    let hit1 = query_pipeline.cast_ray(
-        origin + up * distance + forward * distance,
-        -up,
-        distance * 2.0,
-        true,
-        filter,
-    );
-    let hit2 = query_pipeline.cast_ray(
-        origin + up * distance - forward * distance,
-        -up,
-        distance * 2.0,
-        true,
-        filter,
-    );
+    query_filter: &SpatialQueryFilter,
+    mut filter_hits: impl FnMut(&SweepHitData) -> bool,
+) -> Option<SweepHitData> {
+    let mut get_sweep_hit = |ray_hit: &RayHitData| {
+        let sweep = SweepHitData {
+            point: point - up_direction * ray_hit.distance,
+            normal: ray_hit.normal,
+            distance: ray_hit.distance,
+            entity: ray_hit.entity,
+        };
+        filter_hits(&sweep).then_some(sweep)
+    };
 
-    match (hit1, hit2) {
-        (Some(hit), None) | (None, Some(hit)) => match hit.distance > 0.0 {
-            true => Some(hit),
-            false => None,
-        },
-        (Some(hit1), Some(hit2)) => None,
-        (None, None) => None,
+    let mut hit = None;
+
+    // Early exit if up and normal are parallel
+    let right = up_direction.cross(normal).try_normalize()?;
+    let forward = up_direction.cross(right).try_normalize()?;
+
+    // TODO: step 0 could probably be removed
+    for i in 0..3 {
+        let origin = match i {
+            0 => point + up_direction * epsilon / 2.0,
+            1 => point + (up_direction * 0.5 + forward) * epsilon,
+            2 => point + (up_direction * 0.5 - forward) * epsilon,
+            _ => unreachable!(),
+        };
+
+        let mut new_hit = None;
+        query_pipeline.ray_hits_callback(
+            origin,
+            -up_direction,
+            epsilon,
+            false,
+            query_filter,
+            |ray_hit| {
+                if let Some(sweep) = get_sweep_hit(&ray_hit) {
+                    new_hit = Some(sweep);
+                }
+                new_hit.is_none()
+            },
+        );
+
+        match (hit, new_hit) {
+            (None, Some(new_hit)) => hit = Some(new_hit),
+            (Some(old_hit), Some(new_hit)) => {
+                if new_hit.normal.dot(*up_direction) > old_hit.normal.dot(*up_direction) {
+                    hit = Some(new_hit)
+                }
+            }
+            _ => {}
+        }
     }
+
+    hit
 }
 
+// TODO: remove this and use Surface::new(..).is_walkable instead ???
 pub(crate) fn is_walkable(normal: Vec3, walkable_angle: f32, up: Vec3) -> bool {
     normal.angle_between(up) <= walkable_angle
 }

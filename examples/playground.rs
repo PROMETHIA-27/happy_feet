@@ -34,6 +34,7 @@ fn main() -> AppExit {
         // .add_observer(on_collision_events_end)
         .add_observer(on_ground_enter)
         .add_observer(on_ground_leave)
+        .add_observer(on_step)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_fly_mode)
@@ -227,10 +228,10 @@ fn setup(
         (
             // Restitution::new(1.0),
             Character,
-            CharacterBounce {
-                restitution: 0.9,
-                behaviour: BounceBehaviour::Obstruction,
-            },
+            // CharacterBounce {
+            //     restitution: 0.9,
+            //     behaviour: BounceBehaviour::Obstruction,
+            // },
             // DebugMotion::default(),
             // DebugInput,
             CharacterMovement::default(),
@@ -554,14 +555,6 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-fn on_step(trigger: Trigger<OnStep>, mut query: Query<&mut CameraStepOffset>) {
-    let Ok(mut offset) = query.get_mut(trigger.target()) else {
-        return;
-    };
-
-    offset.0 += -trigger.offset;
-}
-
 fn on_collision_events_start(
     trigger: Trigger<OnCollisionStart>,
     query: Query<Entity, With<Character>>,
@@ -600,4 +593,8 @@ fn on_ground_enter(_: Trigger<OnGroundEnter>) {
 
 fn on_ground_leave(_: Trigger<OnGroundLeave>) {
     info!("LEFT GROUND");
+}
+
+fn on_step(_: Trigger<OnStep>) {
+    info!("STEPPED");
 }
