@@ -13,7 +13,7 @@ use crate::{
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
-    sweep::{SweepHitData},
+    sweep::SweepHitData,
 };
 
 // TODO:

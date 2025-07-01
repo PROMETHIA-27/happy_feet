@@ -152,7 +152,7 @@ impl Default for CollideAndSlideConfig {
     fn default() -> Self {
         Self {
             max_iterations: 4,
-            skin_width: 0.02,
+            skin_width: 0.05,
         }
     }
 }
