@@ -51,8 +51,8 @@ fn detect_ground(
     mut query: Query<(
         &mut Position,
         &Rotation,
-        &PreviousGrounding,
-        &mut Grounding,
+        &mut GroundingState,
+        &Grounding,
         &GroundingConfig,
         &Collider,
         &CollideAndSlideConfig,
@@ -63,22 +63,22 @@ fn detect_ground(
     for (
         mut position,
         rotation,
-        previous_grounding,
-        mut grounding,
+        mut grounding_state,
+        grounding,
         grounding_config,
         collider,
         config,
         filter,
     ) in &mut query
     {
-        if !previous_grounding.is_grounded() && !grounding.is_grounded() {
+        if !grounding.is_grounded() && grounding_state.pending.is_none() {
             continue;
         }
 
+        grounding_state.pending = None;
+
         // Ignore sensors
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
-
-        grounding.inner_ground = None;
 
         // Check for ground
         let Some((surface, hit)) = ground_check(
@@ -133,16 +133,16 @@ fn detect_ground(
             position.0 -= grounding_config.up_direction * hit.distance.max(-0.01);
         }
 
-        grounding.inner_ground = Some(ground);
+        grounding_state.pending = Some(ground);
     }
 }
 
 fn trigger_grounding_events(
-    mut query: Query<(Entity, &Grounding, &PreviousGrounding)>,
+    mut query: Query<(Entity, &mut Grounding, &mut GroundingState)>,
     mut commands: Commands,
 ) {
-    for (entity, grounding, previous_grounding) in &mut query {
-        match (previous_grounding.inner_ground, grounding.inner_ground) {
+    for (entity, mut grounding, mut grounding_state) in &mut query {
+        match (grounding_state.previous, grounding_state.pending) {
             (Some(ground), None) => {
                 commands.entity(entity).trigger(OnGroundLeave(ground));
             }
@@ -151,6 +151,9 @@ fn trigger_grounding_events(
             }
             _ => {}
         }
+
+        grounding_state.previous = grounding_state.pending;
+        *grounding = Grounding::new(grounding_state.pending.take());
     }
 }
 
@@ -179,14 +182,17 @@ impl Default for GroundingConfig {
 }
 
 /// Stores the previous ground state of a character.
-#[derive(Component, Reflect, Deref, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
 #[reflect(Component, Default, Debug, Clone)]
-pub struct PreviousGrounding(pub(crate) Grounding);
+pub struct GroundingState {
+    pub previous: Option<Ground>,
+    pub pending: Option<Ground>,
+}
 
 /// Represents the current ground state of a character.
 #[derive(Component, Reflect, Default, Debug, PartialEq, Clone, Copy)]
 #[reflect(Component, Default, Debug, PartialEq, Clone)]
-#[require(PreviousGrounding)]
+#[require(GroundingState)]
 pub struct Grounding {
     /// The current ground state, if any.
     pub(crate) inner_ground: Option<Ground>,

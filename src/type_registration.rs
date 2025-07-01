@@ -22,7 +22,7 @@ impl Plugin for CharacterTypeRegistrationPlugin {
         )>();
         app.register_type::<(
             grounding::Grounding,
-            grounding::PreviousGrounding,
+            grounding::GroundingState,
             grounding::GroundingConfig,
             grounding::Ground,
             grounding::OnGroundEnter,

@@ -7,9 +7,7 @@ use crate::{
         MovementState, add_to_filter_on_insert_collider, collide_and_slide,
         init_filter_mask_on_insert_collision_layers, remove_from_filter_on_replace_collider,
     },
-    grounding::{
-        Ground, Grounding, GroundingConfig, OnGroundEnter, PreviousGrounding, is_walkable,
-    },
+    grounding::{Ground, Grounding, GroundingConfig, GroundingState, OnGroundEnter, is_walkable},
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
@@ -109,7 +107,7 @@ fn process_movement(
         &Collider,
         &CollideAndSlideFilter,
         &CollideAndSlideConfig,
-        Option<(&mut Grounding, &GroundingConfig, &mut PreviousGrounding)>,
+        Option<(&mut Grounding, &GroundingConfig, &mut GroundingState)>,
         Option<&SteppingConfig>,
         Has<CollisionEventsEnabled>,
     )>,
@@ -271,9 +269,8 @@ fn process_movement(
         position.0 = movement.position;
         velocity.0 = movement.velocity;
 
-        if let Some((mut grounding, _, mut previous_grounding)) = grounding {
-            previous_grounding.0 = *grounding;
-            *grounding = Grounding::new(movement.ground);
+        if let Some((_, _, mut grounding_state)) = grounding {
+            grounding_state.pending = movement.ground;
         }
     }
 }
