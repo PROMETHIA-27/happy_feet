@@ -50,8 +50,8 @@ pub fn collide_and_slide(
             },
         )
         .map(|hit| SweepHitData {
-            // Clamping the distance has its own downsides, but it generally behaves nicer
-            distance: hit.distance.max(0.0),
+            // If already penetrating, move back by a tiny margin
+            distance: hit.distance.max(-0.01),
             ..hit
         }) else {
             state.position += direction * max_distance;

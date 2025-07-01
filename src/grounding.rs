@@ -116,7 +116,6 @@ fn detect_ground(
 
         // Snap to the ground
         if grounding_config.snap_to_surface
-            && hit.distance > 0.0
             && sweep(
                 collider,
                 position.0,
@@ -131,7 +130,7 @@ fn detect_ground(
             )
             .is_none()
         {
-            position.0 -= grounding_config.up_direction * hit.distance;
+            position.0 -= grounding_config.up_direction * hit.distance.max(-0.01);
         }
 
         grounding.inner_ground = Some(ground);
