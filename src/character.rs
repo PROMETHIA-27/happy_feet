@@ -59,6 +59,7 @@ impl Plugin for CharacterPlugin {
     InheritedVelocity,
     GroundingConfig,
     SteppingConfig,
+    CollisionEventsEnabled,
 )]
 pub struct Character;
 
