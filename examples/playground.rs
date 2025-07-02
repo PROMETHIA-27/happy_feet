@@ -270,8 +270,8 @@ fn setup(
             ..Default::default()
         })),
         Transform {
-            // translation: Vec3::new(0.0, 10.0, 0.0),
-            translation: platform_position + platform_offset + Vec3::Y * 10.0,
+            translation: Vec3::new(0.0, 2.0, -2.0),
+            // translation: platform_position + platform_offset + Vec3::Y * 10.0,
             rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },

@@ -7,22 +7,17 @@ use crate::{
         MovementState, add_to_filter_on_insert_collider, collide_and_slide,
         init_filter_mask_on_insert_collision_layers, remove_from_filter_on_replace_collider,
     },
-    grounding::{Ground, Grounding, GroundingConfig, GroundingState, OnGroundEnter, is_walkable},
+    grounding::{
+        Ground, Grounding, GroundingConfig, GroundingState, OnGroundEnter, is_walkable,
+        walkable_angle,
+    },
     moving_platform::InheritedVelocity,
     projection::{Surface, align_with_surface, project_velocity},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
     sweep::SweepHitData,
 };
-
 // TODO:
 // - depenetrate should be in depenetrate.rs
-
-fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
-    match is_grounded {
-        true => max_angle + 0.01,
-        false => max_angle,
-    }
-}
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct CharacterSystems;

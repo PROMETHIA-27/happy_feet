@@ -10,6 +10,13 @@ use crate::{
     sweep::{SweepHitData, sweep},
 };
 
+pub(crate) fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
+    match is_grounded {
+        true => max_angle + 0.01,
+        false => max_angle,
+    }
+}
+
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct GroundingSystems;
 
@@ -87,8 +94,8 @@ fn detect_ground(
             rotation.0,
             grounding_config.up_direction,
             grounding_config.max_distance,
+            walkable_angle(grounding_config.max_angle, grounding.is_grounded()),
             config.skin_width,
-            grounding_config.max_angle,
             &query_pipeline,
             &filter.0,
             filter_hits,
@@ -347,8 +354,8 @@ pub(crate) fn ground_check(
     rotation: Quat,
     up_direction: Dir3,
     max_distance: f32,
-    skin_width: f32,
     walkable_angle: f32,
+    skin_width: f32,
     query_pipeline: &SpatialQueryPipeline,
     query_filter: &SpatialQueryFilter,
     mut filter_hits: impl FnMut(&SweepHitData) -> bool,

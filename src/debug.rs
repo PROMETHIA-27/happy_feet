@@ -17,7 +17,7 @@ impl Plugin for DebugPlugin {
             GizmoConfig {
                 line: GizmoLineConfig {
                     width: 6.0,
-                    joints: GizmoLineJoint::Miter,
+                    joints: GizmoLineJoint::Bevel,
                     ..Default::default()
                 },
                 depth_bias: -0.1,
@@ -151,7 +151,7 @@ fn draw_debug_grounding(
         if let Some(ground) = grounding.ground() {
             gizmos.line_gradient(
                 feet_position,
-                feet_position + ground.normal * 0.5,
+                feet_position + ground.normal * 0.2,
                 color,
                 color.with_alpha(0.0),
             );
