@@ -331,10 +331,20 @@ pub fn jump(impulse: f32, velocity: &mut KinematicVelocity, grounding: &mut Grou
     velocity.0 += up * impulse;
 }
 
-pub fn feet_position(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32) -> Vec3 {
+pub fn feet_offset(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32) -> Vec3 {
     let aabb = shape.aabb(Vec3::ZERO, rotation);
     let down = aabb.min.dot(*up) - skin_width;
     up * down
+}
+
+pub fn feet_position(
+    shape: &Collider,
+    isometry: impl Into<Isometry3d>,
+    up: Dir3,
+    skin_width: f32,
+) -> Vec3 {
+    let isometry = isometry.into();
+    Vec3::from(isometry.translation) + feet_offset(shape, isometry.rotation, up, skin_width)
 }
 
 #[must_use]

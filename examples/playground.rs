@@ -11,7 +11,11 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 use bevy_skein::SkeinPlugin;
-use happy_feet::{movement::jump, prelude::*};
+use happy_feet::{
+    debug::{DebugGrounding, DebugInput},
+    movement::jump,
+    prelude::*,
+};
 
 fn main() -> AppExit {
     App::new()
@@ -233,7 +237,8 @@ fn setup(
             //     behaviour: BounceBehaviour::Obstruction,
             // },
             // DebugMotion::default(),
-            // DebugInput,
+            DebugInput,
+            DebugGrounding,
             CharacterMovement::default(),
             CharacterGravity::default(),
             GroundFriction::default(),
