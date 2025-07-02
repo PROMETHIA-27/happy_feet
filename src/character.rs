@@ -193,7 +193,7 @@ fn process_movement(
                         }) = perform_step(
                             stepping_config,
                             collider,
-                            movement.position,
+                            movement.position(),
                             rotation.0,
                             horizontal_direction,
                             horizontal_motion,
@@ -229,14 +229,14 @@ fn process_movement(
 
                         // Trigger step event
                         commands.entity(entity).trigger(OnStep {
-                            origin: movement.position,
+                            origin: movement.position(),
                             velocity: movement.velocity,
                             offset,
                             hit: step_hit,
                         });
 
                         // Update movement state
-                        movement.position += offset;
+                        movement.offset += offset;
                         movement.velocity = align_with_surface(
                             movement.velocity,
                             step_hit.normal,
@@ -272,12 +272,12 @@ fn process_movement(
             },
         );
 
-        commands.entity(entity).insert(LastUpdateVelocity(
-            (movement.position - position.0) / time.delta_secs(),
-        ));
+        commands
+            .entity(entity)
+            .insert(LastUpdateVelocity(movement.offset / time.delta_secs()));
 
         // Apply movement
-        position.0 = movement.position;
+        position.0 = movement.position();
         velocity.0 = movement.velocity;
 
         if let Some((_, _, mut grounding_state)) = grounding {

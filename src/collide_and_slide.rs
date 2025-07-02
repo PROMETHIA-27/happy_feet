@@ -31,7 +31,7 @@ pub fn collide_and_slide(
             break;
         };
 
-        let origin = state.position;
+        let origin = state.position();
 
         let mut surface = None;
         let Some(hit) = sweep(
@@ -51,17 +51,18 @@ pub fn collide_and_slide(
         )
         .map(|hit| SweepHitData {
             // If already penetrating, move back by a tiny margin
-            distance: hit.distance.max(-0.01),
+            // distance: hit.distance.max(-0.01),
+            distance: hit.distance.max(0.0),
             ..hit
         }) else {
-            state.position += direction * max_distance;
+            state.offset += direction * max_distance;
             break;
         };
 
         let surface = surface.unwrap();
 
         state.remaining_time *= 1.0 - hit.distance / max_distance;
-        state.position += direction * hit.distance;
+        state.offset += direction * hit.distance;
 
         let impact = MovementHitData {
             origin,
@@ -123,7 +124,8 @@ pub enum CollisionResponse {
 #[reflect(Debug, Clone)]
 pub struct MovementState {
     pub velocity: Vec3,
-    pub position: Vec3,
+    pub origin: Vec3,
+    pub offset: Vec3,
     pub remaining_time: f32,
     pub ground: Option<Ground>,
 }
@@ -132,10 +134,15 @@ impl MovementState {
     pub fn new(velocity: Vec3, position: Vec3, duration: f32) -> Self {
         Self {
             velocity,
-            position,
+            origin: position,
+            offset: Vec3::ZERO,
             remaining_time: duration,
             ground: None,
         }
+    }
+
+    pub fn position(&self) -> Vec3 {
+        self.origin + self.offset
     }
 }
 
