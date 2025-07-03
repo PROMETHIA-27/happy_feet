@@ -1,73 +1,77 @@
 use avian3d::{parry::shape::TypedShape, prelude::*};
 use bevy::{color::palettes::css::*, prelude::*};
-use std::collections::VecDeque;
 
 use crate::{
-    Character, KinematicVelocity, feet_position,
-    ground::Grounding,
-    move_character,
-    movement::{CharacterMovement, MoveInput},
-    sweep::CollideAndSlideConfig,
+    character::KinematicVelocity,
+    collide_and_slide::CollideAndSlideConfig,
+    grounding::{Grounding, GroundingConfig},
+    movement::{CharacterMovement, MoveInput, feet_position},
 };
 
-pub(crate) fn plugin(app: &mut App) {
-    app.insert_gizmo_config(
-        CharacterGizmos,
-        GizmoConfig {
-            line: GizmoLineConfig {
-                width: 8.0,
-                joints: GizmoLineJoint::Bevel,
+pub struct DebugPlugin;
+
+impl Plugin for DebugPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_gizmo_config(
+            CharacterGizmos,
+            GizmoConfig {
+                line: GizmoLineConfig {
+                    width: 6.0,
+                    joints: GizmoLineJoint::Bevel,
+                    ..Default::default()
+                },
+                depth_bias: -0.1,
                 ..Default::default()
             },
-            depth_bias: -0.1,
-            ..Default::default()
-        },
-    );
+        );
 
-    app.add_systems(
-        FixedPostUpdate,
-        (draw_input_arrow, draw_motion).after(move_character),
-    );
+        app.add_systems(
+            FixedPostUpdate,
+            (draw_input_arrow, draw_debug_grounding).after(PhysicsSet::Sync),
+        );
+    }
 }
 
 #[derive(GizmoConfigGroup, Reflect, Default)]
 pub(crate) struct CharacterGizmos;
 
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 pub struct DebugInput;
+
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
+pub struct DebugGrounding;
 
 fn draw_input_arrow(
     mut gizmos: Gizmos<CharacterGizmos>,
     query: Query<
         (
-            &Transform,
-            &Character,
+            &Position,
+            &Rotation,
             &KinematicVelocity,
             &CharacterMovement,
             &Collider,
             &MoveInput,
+            &GroundingConfig,
         ),
         With<DebugInput>,
     >,
 ) {
-    for (transform, character, velocity, movement, collider, move_input) in &query {
+    for (position, rotation, velocity, movement, collider, move_input, grounding_config) in &query {
         let half_height = collider
-            .aabb(Vec3::ZERO, transform.rotation)
+            .aabb(Vec3::ZERO, rotation.0)
             .size()
-            .dot(character.up * 0.5);
+            .dot(grounding_config.up_direction * 0.5);
 
         if let Ok(direction) = Dir3::new(move_input.previous()) {
             let speed_len = velocity.0.dot(*direction) / movement.target_speed;
             let accel_len = 1.0 - speed_len.clamp(0.0, 1.0);
 
-            let origin = transform.translation - character.up * half_height;
-            let right = character.up.cross(*direction);
+            let origin = position.0 - grounding_config.up_direction * half_height;
+            let right = grounding_config.up_direction.cross(*direction);
 
-            let color = BLACK
-                .mix(&VIOLET, accel_len)
-                // .mix(&YELLOW, accel_len.powi(2))
-                .mix(&RED, accel_len.powi(4));
+            let color = BLACK.mix(&VIOLET, accel_len).mix(&RED, accel_len.powi(4));
 
             let arrow_head = 0.1;
 
@@ -83,244 +87,74 @@ fn draw_input_arrow(
     }
 }
 
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
-pub struct DebugMode;
-
-#[derive(Reflect, Debug, Clone, Copy)]
-pub(crate) struct DebugHit {
-    pub point: Vec3,
-    pub normal: Vec3,
-    pub is_walkable: bool,
-}
-
-#[derive(Reflect, Debug, Clone, Copy)]
-pub(crate) struct DebugPoint {
-    pub translation: Vec3,
-    pub velocity: Vec3,
-    pub hit: Option<DebugHit>,
-}
-
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
-pub struct DebugMotion {
-    pub(crate) duration: f32,
-    pub(crate) points: VecDeque<(f32, DebugPoint)>,
-}
-
-impl Default for DebugMotion {
-    fn default() -> Self {
-        Self::new(32)
-    }
-}
-
-impl DebugMotion {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            duration: 0.0,
-            points: VecDeque::with_capacity(capacity),
-        }
-    }
-
-    pub(crate) fn push(&mut self, duration: f32, point: DebugPoint) {
-        self.duration += duration;
-        self.points.push_back((duration, point));
-
-        if self.points.capacity() < self.points.len() + 1 {
-            self.duration = self.points.iter().map(|(d, _)| d).sum();
-            self.points.pop_front();
-        }
-    }
-
-    pub(crate) fn duration_at(&self, index: usize) -> f32 {
-        self.points.range(..=index).map(|(d, _)| d).sum()
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.duration = 0.0;
-        self.points.clear()
-    }
-}
-
-fn draw_motion(
+fn draw_debug_grounding(
     mut gizmos: Gizmos<CharacterGizmos>,
-    mut query: Query<(
-        &CollideAndSlideConfig,
-        &KinematicVelocity,
-        &Grounding,
-        &Character,
-        &CharacterMovement,
-        &Collider,
-        &Transform,
-        &mut DebugMotion,
-        Has<DebugMode>,
-    )>,
+    mut query: Query<
+        (
+            &CollideAndSlideConfig,
+            &KinematicVelocity,
+            &Grounding,
+            &GroundingConfig,
+            &CharacterMovement,
+            &Collider,
+            &Position,
+            &Rotation,
+        ),
+        With<DebugGrounding>,
+    >,
 ) {
-    for (
-        config,
-        velocity,
-        grounding,
-        character,
-        movement,
-        collider,
-        transform,
-        mut debug_motion,
-        debug_mode,
-    ) in &mut query
+    for (config, velocity, grounding, grounding_config, movement, collider, position, rotation) in
+        &mut query
     {
-        let line_color = |t: f32, velocity: Vec3| {
-            let target_speed_sq = movement.target_speed * movement.target_speed;
+        let feet_position = feet_position(
+            collider,
+            Isometry3d::new(position.0, rotation.0),
+            grounding_config.up_direction,
+            config.skin_width,
+        );
 
-            let mut color = Hsla::from(MIDNIGHT_BLUE).mix(
-                &Hsla::from(CRIMSON),
-                (velocity.length_squared() / target_speed_sq).min(1.0),
-            );
-
-            let extra = (velocity.length_squared() - target_speed_sq).max(0.0);
-
-            let fac = (extra / target_speed_sq / 10.0).min(1.0);
-            color = color.mix(&Hsla::from(WHEAT), fac);
-
-            match debug_mode {
-                true => color,
-                false => color.with_alpha(t.powf(2.0)),
+        let radius = match collider.shape().as_typed_shape() {
+            TypedShape::Capsule(capsule) => capsule.radius,
+            TypedShape::Cylinder(cylinder) => cylinder.radius,
+            TypedShape::Ball(ball) => ball.radius,
+            shape => {
+                warn_once!("Unsupported collider shape: {shape:?}");
+                0.2
             }
         };
 
-        // lines
-        let mut points = Vec::with_capacity(debug_motion.points.len());
+        let color = match grounding.is_grounded() {
+            true => LIGHT_GREEN,
+            false => CRIMSON,
+        };
 
-        for i in 0..debug_motion.points.len() {
-            let (_, a) = debug_motion.points[i];
+        let up = match grounding.ground() {
+            Some(ground) => ground.normal,
+            None => grounding_config.up_direction,
+        };
 
-            points.push((
-                a.translation
-                    + feet_position(
-                        collider,
-                        transform.rotation,
-                        character.up,
-                        config.skin_width,
-                    ) / 1.5,
-                line_color(
-                    debug_motion.duration_at(i) / debug_motion.duration,
-                    a.velocity,
-                ),
-            ));
-        }
+        let feet_rotation = Transform::from_rotation(rotation.0)
+            .looking_to(up, grounding_config.up_direction)
+            .rotation;
 
-        // Draw the last line to character if debug mode is disabled
-        if !debug_mode {
-            points.push((
-                transform.translation
-                    + feet_position(
-                        collider,
-                        transform.rotation,
-                        character.up,
-                        config.skin_width,
-                    ) / 1.5,
-                line_color(1.0, velocity.0),
-            ));
-        }
+        gizmos.circle(Isometry3d::new(feet_position, feet_rotation), radius, color);
 
-        gizmos.linestrip_gradient(points);
-
-        // hits
-        let mut dbg_point = |debug: DebugPoint| {
-            let radius = match collider.shape().as_typed_shape() {
-                TypedShape::Capsule(capsule) => capsule.radius,
-                TypedShape::Cylinder(cylinder) => cylinder.radius,
-                TypedShape::Ball(ball) => ball.radius,
-                _ => {
-                    warn!("Unsupported collider shape");
-                    0.2
-                }
-            };
-
-            let color = [LIGHT_GREEN, CRIMSON];
-
-            let (point, normal, color) = match debug.hit {
-                Some(hit) => {
-                    let point = hit.point + hit.normal * config.skin_width;
-                    let normal = hit.normal;
-
-                    let color = match hit.is_walkable {
-                        true => color[0],
-                        false => color[1],
-                    };
-
-                    gizmos.line_gradient(point, point + normal * 0.1, WHITE, WHITE.with_alpha(0.0));
-
-                    if let Ok((direction, speed)) = Dir3::new_and_length(debug.velocity) {
-                        gizmos.line_gradient(
-                            point + direction * radius,
-                            point + direction * (radius + speed / movement.target_speed / 2.0),
-                            color,
-                            color.with_alpha(0.0),
-                        );
-                    }
-
-                    (point, normal, color)
-                }
-                None => {
-                    let point = debug.translation
-                        + feet_position(
-                            collider,
-                            transform.rotation,
-                            character.up,
-                            config.skin_width,
-                        );
-
-                    let color = color[1];
-
-                    gizmos.line_gradient(
-                        point,
-                        point - character.up * 0.5,
-                        color,
-                        color.with_alpha(0.0),
-                    );
-
-                    (point, *character.up, color)
-                }
-            };
-
-            let forward = Dir3::new(normal.cross(*character.up)).unwrap_or(Dir3::NEG_Z);
-
-            let transform = Transform::from_translation(point).looking_to(normal, forward);
-
-            gizmos.circle(
-                Isometry3d::new(transform.translation, transform.rotation),
-                radius,
+        if let Ok((direction, length)) = Dir3::new_and_length(velocity.0.reject_from(*up)) {
+            gizmos.line_gradient(
+                feet_position + direction * radius,
+                feet_position + direction * (radius + length / movement.target_speed * 0.5),
                 color,
+                color.with_alpha(0.0),
             );
-        };
+        }
 
-        if debug_mode {
-            // Draw hit points
-            for i in 0..debug_motion.points.len() {
-                let (_, debug) = debug_motion.points[i];
-                dbg_point(debug);
-            }
-
-            debug_motion.clear();
-        } else {
-            // Only draw the last point at character if debug mode is disabled
-            let ground_normal = grounding.normal();
-
-            dbg_point(DebugPoint {
-                translation: transform.translation,
-                velocity: velocity.0,
-                hit: ground_normal.map(|normal| DebugHit {
-                    point: transform.translation
-                        + feet_position(
-                            collider,
-                            transform.rotation,
-                            character.up,
-                            config.skin_width,
-                        ),
-                    normal: *normal,
-                    is_walkable: true,
-                }),
-            });
+        if let Some(ground) = grounding.ground() {
+            gizmos.line_gradient(
+                feet_position,
+                feet_position + ground.normal * 0.2,
+                color,
+                color.with_alpha(0.0),
+            );
         }
     }
 }

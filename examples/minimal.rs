@@ -1,3 +1,6 @@
+//! - WASD for movement
+//! - Space bar for jumping
+
 use avian3d::prelude::*;
 use bevy::{
     color::palettes::css::*,
@@ -6,14 +9,15 @@ use bevy::{
     math::Affine2,
     prelude::*,
 };
+
 use happy_feet::prelude::*;
 
+// Configure movement for ground and air states
 const GROUND_MOVEMENT: CharacterMovement = CharacterMovement {
-    target_speed: 8.0,
+    target_speed: 8.0, // Maximum movement speed
     acceleration: 100.0,
 };
 
-// Less acceleration when in the air
 const AIR_MOVEMENT: CharacterMovement = CharacterMovement {
     target_speed: 8.0,
     acceleration: 20.0,
@@ -22,6 +26,7 @@ const AIR_MOVEMENT: CharacterMovement = CharacterMovement {
 fn main() -> AppExit {
     App::new()
         .add_plugins((
+            // This is used for tiling the ground texture
             DefaultPlugins.set(ImagePlugin {
                 default_sampler: ImageSamplerDescriptor {
                     address_mode_u: ImageAddressMode::Repeat,
@@ -29,22 +34,17 @@ fn main() -> AppExit {
                     ..Default::default()
                 },
             }),
+            // Make sure the physics plugins and character plugins are configured to run in the same schedule (default is FixedPostUpdate for both)
             PhysicsPlugins::default(),
-            CharacterPlugin::default(),
+            CharacterPlugins::default(),
+            // This is used for debugging and can be removed
+            PhysicsDebugPlugin::default(),
         ))
         .add_systems(Startup, (setup_character, setup_level))
         .add_systems(PreUpdate, character_input.after(InputSystem))
-        .add_observer(on_enter_ground)
-        .add_observer(on_leave_ground)
+        .add_observer(init_ground_movement)
+        .add_observer(init_air_movement)
         .run()
-}
-
-fn on_enter_ground(trigger: Trigger<OnGroundEnter>, mut commands: Commands) {
-    commands.entity(trigger.target()).insert(GROUND_MOVEMENT);
-}
-
-fn on_leave_ground(trigger: Trigger<OnGroundLeave>, mut commands: Commands) {
-    commands.entity(trigger.target()).insert(AIR_MOVEMENT);
 }
 
 fn setup_character(
@@ -54,9 +54,17 @@ fn setup_character(
 ) {
     let shape = Capsule3d::new(0.2, 1.0);
     commands.spawn((
-        Character::default(),
-        CharacterGravity(Vec3::NEG_Y * 20.0),
-        CharacterFriction(40.0),
+        Character,
+        AIR_MOVEMENT,
+        // Enable stepping
+        SteppingConfig {
+            max_vertical: 0.3,
+            ..Default::default()
+        },
+        // Enable gravity
+        CharacterGravity::new(Vec3::Y * -20.0),
+        // Enable ground friction
+        GroundFriction(60.0),
         Collider::from(shape),
         Mesh3d(meshes.add(shape)),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -71,7 +79,6 @@ fn character_input(
     key: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut MoveInput, &mut KinematicVelocity, &mut Grounding)>,
 ) {
-    // movement
     let x = match (key.pressed(KeyCode::KeyA), key.pressed(KeyCode::KeyD)) {
         (true, false) => -1.0,
         (false, true) => 1.0,
@@ -82,19 +89,25 @@ fn character_input(
         (false, true) => 1.0,
         _ => 0.0,
     };
+
     let move_direction = Vec3::new(x, 0.0, z).normalize_or_zero();
 
     for (mut move_input, mut velocity, mut grounding) in &mut query {
-        move_input.set(move_direction);
+        move_input.value = move_direction;
 
-        // jump
         if grounding.is_grounded() && key.just_pressed(KeyCode::Space) {
-            // It's important to detach from the ground, otherwise the character will just instantly snap back after jumping.
-            grounding.detach();
-
             velocity.y = 6.0;
+            grounding.detach(); // Detach from the ground to avoid snapping back to it during character update
         }
     }
+}
+
+fn init_ground_movement(trigger: Trigger<OnGroundEnter>, mut commands: Commands) {
+    commands.entity(trigger.target()).insert(GROUND_MOVEMENT);
+}
+
+fn init_air_movement(trigger: Trigger<OnGroundLeave>, mut commands: Commands) {
+    commands.entity(trigger.target()).insert(AIR_MOVEMENT);
 }
 
 fn setup_level(
@@ -134,4 +147,22 @@ fn setup_level(
         },
         Transform::from_xyz(1.0, 1.0, 1.0).looking_at(Vec3::ZERO, Dir3::Z),
     ));
+
+    // obstacles
+    let mut spawn_cube = |pos, size| {
+        let cube = Cuboid::from_size(size);
+        commands.spawn((
+            RigidBody::Static,
+            Collider::from(cube),
+            Transform::from_translation(pos),
+            Mesh3d(meshes.add(cube)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color_texture: Some(asset_server.load("texture_08.png")),
+                ..Default::default()
+            })),
+        ));
+    };
+
+    spawn_cube(Vec3::new(8.0, 0.2, 0.0), Vec3::new(4.0, 0.4, 4.0));
+    spawn_cube(Vec3::new(-8.0, 2.0, 0.0), Vec3::new(4.0, 4.0, 4.0));
 }

@@ -2,10 +2,11 @@ use std::fmt::Debug;
 
 use bevy::{math::InvalidDirectionError, prelude::*};
 
-use crate::is_walkable;
+use crate::grounding::is_walkable;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Surface {
+#[derive(Reflect, Debug, Clone, Copy)]
+#[reflect(Debug, Clone)]
+pub struct Surface {
     pub normal: Dir3,
     pub is_walkable: bool,
 }
@@ -28,12 +29,12 @@ impl Surface {
         current_ground_normal: Option<Dir3>,
         up_direction: Dir3,
     ) -> Result<Dir3, InvalidDirectionError> {
-        if !self.is_walkable {
-            if let Some(ground_normal) = current_ground_normal {
-                // Calculate obstruction normal perpendicular to both ground normal and the up direction
-                let tangent = Dir3::new(ground_normal.cross(*self.normal))?;
-                return Dir3::new(tangent.cross(*up_direction));
-            }
+        if !self.is_walkable
+            && let Some(ground_normal) = current_ground_normal
+        {
+            // Calculate obstruction normal perpendicular to both ground normal and the up direction
+            let tangent = Dir3::new(ground_normal.cross(*self.normal))?;
+            return Dir3::new(tangent.cross(*up_direction));
         }
 
         Ok(self.normal)
@@ -66,8 +67,9 @@ impl Surface {
 }
 
 /// Represents the current state of collision resolution during movement.
-#[derive(Default, Debug, Clone, Copy)]
-pub(crate) enum CollisionState {
+#[derive(Reflect, Default, Debug, Clone, Copy)]
+#[reflect(Default, Debug, Clone)]
+pub enum CollisionState {
     /// Initial state before any collision.
     #[default]
     Initial,
@@ -80,6 +82,10 @@ pub(crate) enum CollisionState {
 }
 
 impl CollisionState {
+    pub fn reset(&mut self) {
+        *self = Self::Initial;
+    }
+
     #[must_use]
     pub fn update(
         &mut self,

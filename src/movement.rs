@@ -1,13 +1,35 @@
 use std::mem;
 
 use avian3d::prelude::*;
-use bevy::prelude::*;
+use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
-    Character, KinematicVelocity, align_with_surface,
-    debug::DebugMode,
-    ground::{Grounding, GroundingConfig},
+    character::{KinematicVelocity, OnHit},
+    grounding::{Grounding, GroundingConfig},
+    projection::align_with_surface,
 };
+
+pub struct MovementPlugin;
+
+impl Plugin for MovementPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
+
+        app.add_systems(
+            PhysicsSchedule,
+            (
+                character_drag,
+                character_friction,
+                character_gravity,
+                character_acceleration,
+            )
+                .in_set(PhysicsStepSet::First)
+                .chain(),
+        );
+
+        app.add_observer(bounce_on_character_hit);
+    }
+}
 
 pub(crate) fn clear_movement_input(mut query: Query<&mut MoveInput>) {
     for mut move_input in &mut query {
@@ -19,18 +41,21 @@ pub(crate) fn character_gravity(
     default_gravity: Res<Gravity>,
     mut query: Query<(
         &mut KinematicVelocity,
-        Option<&CharacterGravity>,
+        &CharacterGravity,
         Option<&Grounding>,
         Option<&GravityScale>,
     )>,
     time: Res<Time>,
 ) {
     for (mut velocity, character_gravity, grounding, gravity_scale) in &mut query {
-        if grounding.map_or(false, |g| g.is_grounded()) {
+        if grounding.is_some_and(|g| g.is_grounded()) {
             continue;
         }
 
-        let mut gravity = character_gravity.map_or(default_gravity.0, |g| g.0);
+        let mut gravity = match character_gravity.0 {
+            Some(gravity) => gravity,
+            None => default_gravity.0,
+        };
 
         if let Some(gravity_scale) = gravity_scale {
             gravity *= gravity_scale.0;
@@ -41,7 +66,7 @@ pub(crate) fn character_gravity(
 }
 
 pub(crate) fn character_friction(
-    mut characters: Query<(&mut KinematicVelocity, &Grounding, &CharacterFriction)>,
+    mut characters: Query<(&mut KinematicVelocity, &Grounding, &GroundFriction)>,
     frictions: Query<&FrictionScale>,
     colliders: Query<&ColliderOf>,
     time: Res<Time>,
@@ -56,10 +81,10 @@ pub(crate) fn character_friction(
         // Multiply friction by the friction scale
         if let Ok(s) = frictions.get(ground.entity) {
             friction *= s.0;
-        } else if let Ok(collider_of) = colliders.get(ground.entity) {
-            if let Ok(s) = frictions.get(collider_of.body) {
-                friction *= s.0;
-            }
+        } else if let Ok(collider_of) = colliders.get(ground.entity)
+            && let Ok(s) = frictions.get(collider_of.body)
+        {
+            friction *= s.0;
         }
 
         let f = friction_factor(velocity.0, friction, time.delta_secs());
@@ -79,122 +104,148 @@ pub(crate) fn character_drag(
 
 pub(crate) fn character_acceleration(
     mut query: Query<(
-        &Character,
         &MoveInput,
         &mut KinematicVelocity,
         Option<(&Grounding, &GroundingConfig)>,
         &CharacterMovement,
-        Has<DebugMode>,
+        Option<&BrakeFactor>,
     )>,
     time: Res<Time>,
 ) {
-    for (character, move_input, mut character_velocity, grounding, movement, debug_mode) in
-        &mut query
-    {
+    for (move_input, mut character_velocity, grounding, movement, brake_factor) in &mut query {
         let Ok((direction, throttle)) = Dir3::new_and_length(move_input.value) else {
             continue;
         };
 
-        if debug_mode {
-            character_velocity.0 = direction * movement.target_speed * throttle;
-            continue;
-        }
-
         let mut direction = *direction;
         let mut velocity = character_velocity.0;
 
-        if let Some((grounding, _grounding_settings)) = grounding {
+        if let Some((grounding, grounding_config)) = grounding {
             if let Some(normal) = grounding.normal() {
-                direction = align_with_surface(direction, *normal, *character.up);
-                velocity = align_with_surface(velocity, *normal, *character.up);
+                direction = align_with_surface(direction, *normal, *grounding_config.up_direction);
+                velocity = align_with_surface(velocity, *normal, *grounding_config.up_direction);
+            }
+
+            if brake_factor.is_some() {
+                velocity = velocity.reject_from(*grounding_config.up_direction);
             }
         }
 
-        let move_accel = acceleration(
-            velocity,
-            direction,
-            movement.acceleration * throttle,
-            movement.target_speed * throttle,
-            time.delta_secs(),
-        );
+        let max_acceleration = movement.acceleration * throttle;
 
-        // let move_accel = acceleration_with_brake(
-        //     velocity.reject_from_normalized(*character.up),
-        //     direction,
-        //     movement.acceleration * throttle,
-        //     movement.target_speed * throttle,
-        //     BrakeFactor::all(0.1),
-        //     time.delta_secs(),
-        // );
+        let move_accel = match brake_factor {
+            None => acceleration(
+                velocity,
+                direction,
+                max_acceleration,
+                movement.target_speed,
+                time.delta_secs(),
+            ),
+            Some(brake_factor) => acceleration_with_brake(
+                velocity,
+                direction,
+                max_acceleration,
+                movement.target_speed,
+                *brake_factor,
+                time.delta_secs(),
+            ),
+        };
 
         character_velocity.0 += move_accel;
     }
 }
 
-/// Used for moving a character based on it's [`MoveInput`].
-#[derive(Component, Reflect, Debug)]
-#[reflect(Component)]
+pub(crate) fn bounce_on_character_hit(
+    trigger: Trigger<OnHit>,
+    mut query: Query<(
+        &mut KinematicVelocity,
+        &CharacterBounce,
+        Option<&mut Grounding>,
+    )>,
+) {
+    let Ok((mut velocity, bounce, grounding)) = query.get_mut(trigger.target()) else {
+        return;
+    };
+
+    match bounce.behaviour {
+        BounceBehaviour::Never => return,
+        BounceBehaviour::Ground if !trigger.hit.surface.is_walkable => return,
+        BounceBehaviour::Obstruction if trigger.hit.surface.is_walkable => return,
+        _ => {}
+    }
+
+    let bounce_impulse = -trigger.velocity.dot(*trigger.hit.surface.normal) * bounce.restitution;
+
+    velocity.0 += *trigger.hit.surface.normal * bounce_impulse;
+
+    if bounce_impulse > 0.1
+        && let Some(mut grounding) = grounding
+    {
+        grounding.detach();
+    }
+}
+
+/// Used for modifying [`KinematicVelocity`] based on [`MoveInput`].
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(MoveInput, KinematicVelocity)]
 pub struct CharacterMovement {
     pub target_speed: f32,
     pub acceleration: f32,
 }
 
-impl CharacterMovement {
-    pub const DEFAULT_GROUND: Self = Self {
-        target_speed: 8.0,
-        acceleration: 100.0,
-    };
-
-    pub const DEFAULT_AIR: Self = Self {
-        target_speed: 8.0,
-        acceleration: 20.0,
-    };
+impl Default for CharacterMovement {
+    fn default() -> Self {
+        Self {
+            target_speed: 8.0,
+            acceleration: 100.0,
+        }
+    }
 }
 
 /// The gravity force affecting a character while it's not grounded.
-/// If no gravity is defined, then the [`Gravity`] resource will be used instead.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component, Default)]
+/// If no gravity is defined, then the [`Gravity`] resource will be used.
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[reflect(Component, Default, Debug, Clone)]
 #[require(KinematicVelocity)]
-pub struct CharacterGravity(pub Vec3);
+pub struct CharacterGravity(pub Option<Vec3>);
 
-impl Default for CharacterGravity {
-    fn default() -> Self {
-        Self(Vec3::Y * -9.81)
+impl CharacterGravity {
+    pub fn new(gravity: Vec3) -> Self {
+        Self(Some(gravity))
     }
 }
 
 impl CharacterGravity {
-    pub const ZERO: Self = Self(Vec3::ZERO);
-    pub const EARTH: Self = Self(Vec3::new(0.0, -9.81, 0.0));
+    pub const ZERO: Self = Self(Some(Vec3::ZERO));
+    pub const EARTH: Self = Self(Some(Vec3::new(0.0, -9.81, 0.0)));
 }
 
 /// The friction scale when a character walks on an entity.
-#[derive(Component, Reflect, Default, Debug, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[reflect(Component, Default, Debug, Clone)]
 pub struct FrictionScale(pub f32);
 
 /// The friction applied to [`KinematicVelocity`] when a character is grounded.
 /// Multiplied by the [`FrictionScale`] of the ground entity.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
-pub struct CharacterFriction(pub f32);
+pub struct GroundFriction(pub f32);
 
-impl Default for CharacterFriction {
+impl Default for GroundFriction {
     fn default() -> Self {
         Self(60.0)
     }
 }
 
-impl CharacterFriction {
+impl GroundFriction {
     pub const ZERO: Self = Self(0.0);
 }
 
 /// The drag force applied to the [`KinematicVelocity`] of a character.
-#[derive(Component, Reflect, Debug, Clone, Deref, DerefMut)]
-#[reflect(Component)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct CharacterDrag(pub f32);
 
@@ -206,6 +257,32 @@ impl Default for CharacterDrag {
 
 impl CharacterDrag {
     pub const ZERO: Self = Self(0.0);
+}
+
+#[derive(Reflect, Default, Debug, Clone)]
+#[reflect(Debug, Default, Clone)]
+pub enum BounceBehaviour {
+    Always,
+    Ground,
+    #[default]
+    Obstruction,
+    Never,
+}
+
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug, Clone)]
+pub struct CharacterBounce {
+    pub restitution: f32,
+    pub behaviour: BounceBehaviour,
+}
+
+impl Default for CharacterBounce {
+    fn default() -> Self {
+        Self {
+            restitution: 0.9,
+            behaviour: Default::default(),
+        }
+    }
 }
 
 /// The desired movement direction of a character.
@@ -254,14 +331,41 @@ pub fn jump(impulse: f32, velocity: &mut KinematicVelocity, grounding: &mut Grou
     velocity.0 += up * impulse;
 }
 
-pub fn feet_position(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32) -> Vec3 {
+pub fn feet_offset(shape: &Collider, rotation: Quat, up: Dir3, skin_width: f32) -> Vec3 {
     let aabb = shape.aabb(Vec3::ZERO, rotation);
     let down = aabb.min.dot(*up) - skin_width;
     up * down
 }
 
+pub fn feet_position(
+    shape: &Collider,
+    isometry: impl Into<Isometry3d>,
+    up: Dir3,
+    skin_width: f32,
+) -> Vec3 {
+    let isometry = isometry.into();
+    Vec3::from(isometry.translation) + feet_offset(shape, isometry.rotation, up, skin_width)
+}
+
 #[must_use]
-fn acceleration(
+pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
+    f32::exp(-drag * delta)
+}
+
+/// Constant acceleration in the opposite direction of velocity.
+#[must_use]
+pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
+    let speed_sq = velocity.length_squared();
+
+    if speed_sq < 1e-4 {
+        return 0.0;
+    }
+
+    f32::exp(-friction / speed_sq.sqrt() * delta)
+}
+
+#[must_use]
+pub fn acceleration(
     velocity: Vec3,
     direction: Vec3,
     max_acceleration: f32,
@@ -282,25 +386,9 @@ fn acceleration(
     direction * accel_speed
 }
 
-#[must_use]
-pub(crate) fn drag_factor(drag: f32, delta: f32) -> f32 {
-    f32::exp(-drag * delta)
-}
-
-/// Constant acceleration in the opposite direction of velocity.
-#[must_use]
-pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 {
-    let speed_sq = velocity.length_squared();
-
-    if speed_sq < 1e-4 {
-        return 0.0;
-    }
-
-    f32::exp(-friction / speed_sq.sqrt() * delta)
-}
-
 /// Factors controlling braking behavior in different directions.
-#[derive(Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[reflect(Component, Debug, Clone)]
 pub struct BrakeFactor {
     /// Slow down backward motion when moving against the input direction.
     pub reverse: f32,
@@ -361,7 +449,7 @@ pub fn acceleration_with_brake(
         accel += rev_brake_speed * direction;
     }
 
-    // Leteral braking.
+    // Lateral braking.
     if brake_factor.lateral.abs() > 0.0 {
         let perp_vel = velocity - current_speed * direction;
         accel -= perp_vel.clamp_length_max(max_acceleration * brake_factor.lateral * delta);
