@@ -28,8 +28,9 @@ impl Plugin for GroundingPlugin {
             PhysicsSchedule,
             GroundingSystems
                 .after(CharacterSystems)
-                .in_set(NarrowPhaseSet::Last),
+                .in_set(PhysicsStepSet::Last),
         );
+
         app.add_systems(
             PhysicsSchedule,
             (detect_ground, trigger_grounding_events)
