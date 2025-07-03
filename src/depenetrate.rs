@@ -3,7 +3,7 @@ use bevy::prelude::*;
 
 use crate::{
     character::{CharacterSystems, KinematicVelocity},
-    grounding::{Ground, Grounding, GroundingConfig, OnGroundEnter},
+    grounding::{Ground, Grounding, GroundingConfig},
     projection::{Surface, project_velocity},
 };
 
@@ -133,11 +133,6 @@ pub(crate) fn depenetrate(
                 && let Some((grounding, _)) = grounding.as_mut()
             {
                 let ground = Ground::new(other, hit_normal);
-
-                if !grounding.is_grounded() {
-                    commands.entity(entity).trigger(OnGroundEnter(ground));
-                }
-
                 **grounding = ground.into();
             }
         }
