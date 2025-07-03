@@ -21,6 +21,8 @@ pub fn collide_and_slide(
     mut on_hit: impl FnMut(&mut MovementState, MovementHitData) -> CollisionResponse,
     mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
 ) {
+    assert!(config.max_penetration_retraction >= 0.0);
+
     let mut collision_state = CollisionState::default();
     let mut previous_velocity = state.velocity;
 
@@ -148,7 +150,7 @@ pub struct CollideAndSlideConfig {
     pub max_iterations: u8,
     /// Small outward offset from the collision surface to prevent numerical precision issues. Default: `0.05`
     pub skin_width: f32,
-    /// Maximum distance to push back when resolving penetration. Default: `0.0`
+    /// Maximum distance to push back when resolving penetration. Must not be negative. Default: `0.0`
     pub max_penetration_retraction: f32,
 }
 
