@@ -7,6 +7,7 @@ use bevy::{
 pub mod character;
 pub mod collide_and_slide;
 pub mod debug;
+pub mod depenetrate;
 pub mod grounding;
 pub mod movement;
 pub mod moving_platform;
@@ -53,9 +54,9 @@ impl CharacterPlugins {
 impl PluginGroup for CharacterPlugins {
     fn build(self) -> PluginGroupBuilder {
         use crate::{
-            character::CharacterPlugin, debug::DebugPlugin, grounding::GroundingPlugin,
-            movement::MovementPlugin, moving_platform::MovingPlatformPlugin,
-            physics_interaction::PhysicsInteractionPlugin,
+            character::CharacterPlugin, debug::DebugPlugin, depenetrate::DepenetratePlugin,
+            grounding::GroundingPlugin, movement::MovementPlugin,
+            moving_platform::MovingPlatformPlugin, physics_interaction::PhysicsInteractionPlugin,
             type_registration::CharacterTypeRegistrationPlugin,
         };
 
@@ -64,6 +65,7 @@ impl PluginGroup for CharacterPlugins {
             .add(CharacterTypeRegistrationPlugin)
             .add(CharacterPlugin)
             .add(GroundingPlugin)
+            .add(DepenetratePlugin)
             .add(MovingPlatformPlugin::new(self.schedule))
             .add(PhysicsInteractionPlugin)
             .add(MovementPlugin)
