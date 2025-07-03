@@ -139,8 +139,8 @@ impl MovementState {
 
 /// Configuration parameters for [`collide_and_slide`] movement.
 ///
-// TODO: make this a resource and have the component act as an override
-#[derive(Component, Reflect, Debug, Clone, Copy)]
+/// Can be configured globally via the resource or per-entity using a component.
+#[derive(Resource, Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(CollideAndSlideFilter)]
 pub struct CollideAndSlideConfig {

@@ -59,6 +59,7 @@ pub struct OnGroundLeave(pub Ground);
 
 fn detect_ground(
     query_pipeline: Res<SpatialQueryPipeline>,
+    global_collide_and_slide_config: Res<CollideAndSlideConfig>,
     mut query: Query<(
         &mut Position,
         &Rotation,
@@ -66,7 +67,7 @@ fn detect_ground(
         &Grounding,
         &GroundingConfig,
         &Collider,
-        &CollideAndSlideConfig,
+        Option<&CollideAndSlideConfig>,
         &CollideAndSlideFilter,
     )>,
     sensors: Query<Entity, With<Sensor>>,
@@ -78,7 +79,7 @@ fn detect_ground(
         grounding,
         grounding_config,
         collider,
-        config,
+        collide_and_slide_config,
         filter,
     ) in &mut query
     {
@@ -86,6 +87,10 @@ fn detect_ground(
         if !grounding.is_grounded() && grounding_state.pending.is_none() {
             continue;
         }
+
+        let collide_and_slide_config = collide_and_slide_config
+            .copied()
+            .unwrap_or(*global_collide_and_slide_config);
 
         // Filter out sensor entities from collision detection
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
@@ -108,7 +113,7 @@ fn detect_ground(
             grounding.is_grounded(),
             &CollideAndSlideConfig {
                 max_iterations: grounding_config.max_iterations,
-                ..*config
+                ..collide_and_slide_config
             },
             &query_pipeline,
             &filter.0,
@@ -152,7 +157,7 @@ fn detect_ground(
                 true => {
                     // If we've penetrated too far into the ground (beyond max_penetration_retraction),
                     // push the character back up to maintain proper ground contact
-                    if hit.distance < -config.max_penetration_retraction {
+                    if hit.distance < -collide_and_slide_config.max_penetration_retraction {
                         movement.offset -= grounding_config.up_direction * hit.distance;
                     }
                     CollisionResponse::Stop

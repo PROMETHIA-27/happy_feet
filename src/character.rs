@@ -22,14 +22,16 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(
-            PhysicsSchedule,
-            CharacterSystems.in_set(NarrowPhaseSet::Last),
-        );
+        app.init_resource::<CollideAndSlideConfig>();
 
         app.add_observer(init_filter_mask_on_insert_collision_layers);
         app.add_observer(add_to_filter_on_insert_collider);
         app.add_observer(remove_from_filter_on_replace_collider);
+
+        app.configure_sets(
+            PhysicsSchedule,
+            CharacterSystems.in_set(NarrowPhaseSet::Last),
+        );
 
         app.add_systems(
             PhysicsSchedule,
@@ -62,7 +64,7 @@ pub struct MovementDelta(pub Vec3);
 /// The velocity of a kinematic body that is moved using [`collide-and-slide`](collide_and_slide).
 #[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
-#[require(CollideAndSlideConfig)]
+#[require(CollideAndSlideFilter)]
 pub struct KinematicVelocity(pub Vec3);
 
 /// Event that is triggered when a character collides with an obstacle during movement.
@@ -94,6 +96,7 @@ fn update_query_pipeline(mut spatial_query: SpatialQuery) {
 #[allow(clippy::type_complexity)]
 fn process_movement(
     // mut gizmos: Gizmos,
+    global_collide_and_slide_config: Res<CollideAndSlideConfig>,
     query_pipeline: Res<SpatialQueryPipeline>,
     mut commands: Commands,
     mut query: Query<(
@@ -103,7 +106,7 @@ fn process_movement(
         &Rotation,
         &Collider,
         &CollideAndSlideFilter,
-        &CollideAndSlideConfig,
+        Option<&CollideAndSlideConfig>,
         Option<(&mut Grounding, &GroundingConfig, &mut GroundingState)>,
         Option<&SteppingConfig>,
         Has<CollisionEventsEnabled>,
@@ -122,15 +125,13 @@ fn process_movement(
         rotation,
         collider,
         filter,
-        config,
+        collide_and_slide_config,
         grounding,
         stepping,
         collision_events_enabled,
         is_sensor,
     ) in &mut query
     {
-        let is_grounded = grounding.as_ref().is_some_and(|(g, ..)| g.is_grounded());
-
         // Sensors don't need to collide
         // TODO: should we still trigger OnHit events maybe?
         if is_sensor {
@@ -138,8 +139,14 @@ fn process_movement(
             continue;
         }
 
+        let collide_and_slide_config = collide_and_slide_config
+            .copied()
+            .unwrap_or(*global_collide_and_slide_config);
+
         // Filter out sensor entities from collision detection
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
+
+        let is_grounded = grounding.as_ref().is_some_and(|(g, ..)| g.is_grounded());
 
         let mut movement = MovementState::new(velocity.0, position.0, time.delta_secs());
 
@@ -148,7 +155,7 @@ fn process_movement(
             collider,
             rotation.0,
             is_grounded,
-            config,
+            &collide_and_slide_config,
             &query_pipeline,
             &filter.0,
             |hit| {
@@ -190,18 +197,18 @@ fn process_movement(
                             vertical,
                             hit: step_hit,
                         }) = perform_step(
-                            stepping_config,
-                            collider,
-                            movement.position(),
-                            rotation.0,
-                            horizontal_direction,
-                            horizontal_motion,
-                            grounding_config.up_direction,
-                            config.skin_width,
-                            &query_pipeline,
-                            &filter.0,
-                            filter_hits,
-                            |hit| {
+                        stepping_config,
+                        collider,
+                        movement.position(),
+                        rotation.0,
+                        horizontal_direction,
+                        horizontal_motion,
+                        grounding_config.up_direction,
+                        collide_and_slide_config.skin_width,
+                        &query_pipeline,
+                        &filter.0,
+                        filter_hits,
+                        |hit| {
                                 // Only step on surfaces that are walkable
                                 if !is_walkable(
                                     hit.normal,
