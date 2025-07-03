@@ -22,7 +22,6 @@ fn main() -> AppExit {
         .add_plugins((
             DefaultPlugins,
             PhysicsPlugins::default(),
-            // PhysicsDebugPlugin::default(),
             SkeinPlugin::default(),
             CharacterPlugins::default(),
             EnhancedInputPlugin,
@@ -34,15 +33,13 @@ fn main() -> AppExit {
         })
         .init_gizmo_group::<PhysicsGizmos>()
         .add_input_context::<Walking>()
-        // .add_observer(on_collision_events_start)
-        // .add_observer(on_collision_events_end)
         .add_observer(on_ground_enter)
         .add_observer(on_ground_leave)
         .add_observer(on_step)
         .add_observer(on_jump)
         .add_observer(on_toggle_perspective)
         .add_observer(on_toggle_fly_mode)
-        // .add_observer(on_step)
+        .add_observer(on_toggle_no_clip)
         .add_systems(Startup, setup)
         .add_systems(PreUpdate, update_movement_settings)
         .add_systems(
@@ -61,7 +58,6 @@ fn main() -> AppExit {
                 .chain(),
         )
         .add_systems(FixedUpdate, move_animated_platform)
-        // .add_systems(FixedUpdate, dbg_speed)
         .run()
 }
 
@@ -327,6 +323,10 @@ struct TogglePerspective;
 #[input_action(output = bool)]
 struct ToggleFlyMode;
 
+#[derive(InputAction, Debug)]
+#[input_action(output = bool)]
+struct ToggleNoClip;
+
 fn walking_actions() -> Actions<Walking> {
     let mut actions = Actions::default();
 
@@ -359,6 +359,11 @@ fn walking_actions() -> Actions<Walking> {
         .with_conditions(Press::default());
 
     actions
+        .bind::<ToggleNoClip>()
+        .to(KeyCode::Tab)
+        .with_conditions(Press::default());
+
+    actions
         .bind::<TogglePerspective>()
         .to(KeyCode::KeyC)
         .with_conditions(Press::default());
@@ -385,6 +390,18 @@ fn on_toggle_fly_mode(
             gravity.0 = Some(Vec3::NEG_Y * 20.0);
         }
     }
+}
+
+fn on_toggle_no_clip(
+    trigger: Trigger<Fired<ToggleNoClip>>,
+    mut commands: Commands,
+    query: Query<Has<Sensor>>,
+) {
+    let is_sensor = query.get(trigger.target()).unwrap();
+    match is_sensor {
+        true => commands.entity(trigger.target()).remove::<Sensor>(),
+        false => commands.entity(trigger.target()).insert(Sensor),
+    };
 }
 
 fn on_toggle_perspective(
@@ -553,37 +570,7 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-fn on_collision_events_start(
-    trigger: Trigger<OnCollisionStart>,
-    query: Query<Entity, With<Character>>,
-    names: Query<NameOrEntity>,
-) {
-    if !query.contains(trigger.target()) {
-        return;
-    }
 
-    info!(
-        "COLLISION STARTED: {} <-> {}",
-        names.get(trigger.target()).unwrap(),
-        names.get(trigger.collider).unwrap(),
-    );
-}
-
-fn on_collision_events_end(
-    trigger: Trigger<OnCollisionEnd>,
-    query: Query<Entity, With<Character>>,
-    names: Query<NameOrEntity>,
-) {
-    if !query.contains(trigger.target()) {
-        return;
-    }
-
-    info!(
-        "COLLISION ENDED: {} <-> {}",
-        names.get(trigger.target()).unwrap(),
-        names.get(trigger.collider).unwrap()
-    );
-}
 
 fn on_ground_enter(_: Trigger<OnGroundEnter>) {
     info!("ENTERED GROUND");
