@@ -16,6 +16,7 @@ use crate::{
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
     sweep::SweepHitData,
 };
+
 // TODO:
 // - depenetrate should be in depenetrate.rs
 
@@ -58,13 +59,13 @@ impl Plugin for CharacterPlugin {
 )]
 pub struct Character;
 
-/// The actual movement during the last collide-and-slide update.
+/// The actual movement during the last [`collide-and-slide`](collide_and_slide) update.
 #[derive(Component, Reflect, Deref, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
 #[component(immutable)]
-pub struct LastUpdateVelocity(pub Vec3);
+pub struct MovementDelta(pub Vec3);
 
-/// The velocity of a kinematic body that is moved using collide-and-slide.
+/// The velocity of a kinematic body that is moved using [`collide-and-slide`](collide_and_slide).
 #[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
 #[reflect(Component, Debug, Default, Clone)]
 #[require(CollideAndSlideConfig)]
@@ -112,6 +113,7 @@ fn process_movement(
         Option<(&mut Grounding, &GroundingConfig, &mut GroundingState)>,
         Option<&SteppingConfig>,
         Has<CollisionEventsEnabled>,
+        Has<Sensor>,
     )>,
     rigid_bodies: Query<&RigidBody>,
     sensors: Query<Entity, With<Sensor>>,
@@ -130,11 +132,18 @@ fn process_movement(
         grounding,
         stepping,
         collision_events_enabled,
+        is_sensor,
     ) in &mut query
     {
         let is_grounded = grounding.as_ref().is_some_and(|(g, ..)| g.is_grounded());
 
-        // Ignore sensors
+        // Sensors don't collide
+        if is_sensor {
+            position.0 += velocity.0 * time.delta_secs();
+            continue;
+        }
+
+        // Filter out sensor entities from collision detection
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
 
         let mut movement = MovementState::new(velocity.0, position.0, time.delta_secs());
@@ -145,8 +154,8 @@ fn process_movement(
             rotation.0,
             is_grounded,
             config,
-            &filter.0,
             &query_pipeline,
+            &filter.0,
             |hit| {
                 if !filter_hits(hit) {
                     return None;
@@ -198,16 +207,17 @@ fn process_movement(
                             &filter.0,
                             filter_hits,
                             |hit| {
-                                // Only step on walkable surfaces
+                                // Only step on surfaces that are walkable
                                 if !is_walkable(
                                     hit.normal,
+                                    // Not sure if this is necessary ???
                                     grounding_config.max_angle - 0.01,
                                     *grounding_config.up_direction,
                                 ) {
                                     return false;
                                 }
 
-                                // Stepping on dynamic bodies is a bit buggy right now
+                                // Stepping on dynamic bodies is a bit buggy right now ):
                                 if let Ok(rb) = rigid_bodies.get(hit.entity)
                                     && rb.is_dynamic()
                                 {
@@ -254,7 +264,8 @@ fn process_movement(
                 // Write collision events
                 if collision_events_enabled {
                     collision_started_events.write(CollisionStarted(entity, hit.entity));
-                    collision_ended_events.write(CollisionEnded(entity, hit.entity)); // Assume the collision is ended immediately
+                    // Assume the collision is ended immediately, which it did because we slided (:
+                    collision_ended_events.write(CollisionEnded(entity, hit.entity));
                 }
 
                 CollisionResponse::Slide
@@ -269,10 +280,10 @@ fn process_movement(
 
         commands
             .entity(entity)
-            .insert(LastUpdateVelocity(movement.offset / time.delta_secs()));
+            .insert(MovementDelta(movement.offset));
 
         // Apply movement
-        position.0 = movement.position();
+        position.0 += movement.offset;
         velocity.0 = movement.velocity;
 
         if let Some((_, _, mut grounding_state)) = grounding {

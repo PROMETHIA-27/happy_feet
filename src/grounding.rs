@@ -110,8 +110,8 @@ fn detect_ground(
                 max_iterations: grounding_config.max_iterations,
                 ..*config
             },
-            &filter.0,
             &query_pipeline,
+            &filter.0,
             |hit| {
                 if !filter_hits(hit) {
                     return None;
