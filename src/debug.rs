@@ -89,9 +89,10 @@ fn draw_input_arrow(
 
 fn draw_debug_grounding(
     mut gizmos: Gizmos<CharacterGizmos>,
+    global_collide_and_slide_config: Res<CollideAndSlideConfig>,
     mut query: Query<
         (
-            &CollideAndSlideConfig,
+            Option<&CollideAndSlideConfig>,
             &KinematicVelocity,
             &Grounding,
             &GroundingConfig,
@@ -103,14 +104,26 @@ fn draw_debug_grounding(
         With<DebugGrounding>,
     >,
 ) {
-    for (config, velocity, grounding, grounding_config, movement, collider, position, rotation) in
-        &mut query
+    for (
+        collide_and_slide_config,
+        velocity,
+        grounding,
+        grounding_config,
+        movement,
+        collider,
+        position,
+        rotation,
+    ) in &mut query
     {
+        let collide_and_slide_config = collide_and_slide_config
+            .copied()
+            .unwrap_or(*global_collide_and_slide_config);
+
         let feet_position = feet_position(
             collider,
             Isometry3d::new(position.0, rotation.0),
             grounding_config.up_direction,
-            config.skin_width,
+            collide_and_slide_config.skin_width,
         );
 
         let radius = match collider.shape().as_typed_shape() {
