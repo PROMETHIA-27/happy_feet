@@ -10,7 +10,7 @@ use crate::{
         collide_and_slide,
     },
     projection::Surface,
-    sweep::{SweepHitData, collision_sweep},
+    sweep::SweepHitData,
 };
 
 pub(crate) fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
@@ -166,28 +166,6 @@ fn detect_ground(
             },
             |velocity, surface| velocity.reject_from(*surface.normal),
         );
-
-        // TODO: this is better but we're doing it kinda twice
-        if let Some(hit) = collision_sweep(
-            collider,
-            movement.position(),
-            rotation.0,
-            -grounding_config.up_direction,
-            grounding_config.max_distance,
-            collide_and_slide_config.skin_width,
-            &query_pipeline,
-            &filter.0,
-            true,
-            filter_hits,
-        ) && let Some(ground) = Ground::new_if_walkable(
-            hit.entity,
-            hit.normal,
-            grounding_config.up_direction,
-            walkable_angle(grounding_config.max_angle, grounding.is_grounded()),
-        ) {
-            movement.ground = Some(ground);
-            movement.offset -= grounding_config.up_direction * hit.distance;
-        }
 
         grounding_state.pending = movement.ground;
 
