@@ -2,8 +2,8 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
-    grounding::ground_surface_rays,
-    sweep::{SweepHitData, sweep},
+    grounding::find_surface_normal,
+    sweep::{SweepHitData, collision_sweep},
 };
 
 const STEP_EPSILON: f32 = 1e-4;
@@ -77,7 +77,7 @@ fn step_up(
 ) -> Option<f32> {
     let mut step_up = max_step_up;
 
-    if let Some(hit) = sweep(
+    if let Some(hit) = collision_sweep(
         shape,
         origin,
         rotation,
@@ -128,7 +128,7 @@ fn step_forward(
 
         // Sweep forward
         let mut hit_wall = false;
-        if let Some(hit) = sweep(
+        if let Some(hit) = collision_sweep(
             shape,
             step_up_position,
             rotation,
@@ -153,7 +153,7 @@ fn step_forward(
 
         // Sweep down
         let mut valid_step = None;
-        if let Some(mut hit) = sweep(
+        if let Some(mut hit) = collision_sweep(
             shape,
             step_forward_position,
             rotation,
@@ -167,7 +167,7 @@ fn step_forward(
         ) && hit.distance > 0.0
             && step_up - hit.distance > skin_width
         {
-            if let Some(ray_hit) = ground_surface_rays(
+            if let Some(ray_hit) = find_surface_normal(
                 hit.point,
                 hit.normal,
                 up_direction,

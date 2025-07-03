@@ -13,7 +13,7 @@ pub struct SweepHitData {
 /// Returns the safe hit distance and the hit data from the spatial query for the first hit
 /// where `f` returns `true`.
 #[must_use]
-pub(crate) fn sweep(
+pub(crate) fn collision_sweep(
     shape: &Collider,
     origin: Vec3,
     rotation: Quat,

@@ -6,7 +6,7 @@ use bevy::{ecs::relationship::RelationshipSourceCollection, prelude::*};
 use crate::{
     grounding::Ground,
     projection::{CollisionState, Surface},
-    sweep::{SweepHitData, sweep},
+    sweep::{SweepHitData, collision_sweep},
 };
 
 pub fn collide_and_slide(
@@ -34,7 +34,7 @@ pub fn collide_and_slide(
         let origin = state.position();
 
         let mut surface = None;
-        let Some(hit) = sweep(
+        let Some(hit) = collision_sweep(
             shape,
             origin,
             rotation,
@@ -48,40 +48,36 @@ pub fn collide_and_slide(
                 surface = get_surface(hit);
                 surface.is_some()
             },
-        )
-        .map(|hit| SweepHitData {
-            // If already penetrating, move back by a tiny margin
-            // distance: hit.distance.max(-0.01),
-            distance: hit.distance.max(0.0),
-            ..hit
-        }) else {
+        ) else {
             state.offset += direction * max_distance;
             break;
         };
 
         let surface = surface.unwrap();
+        let distance = hit.distance.max(-config.max_penetration_retraction);
 
-        state.remaining_time *= 1.0 - hit.distance / max_distance;
-        state.offset += direction * hit.distance;
+        state.remaining_time *= 1.0 - distance / max_distance;
+        state.offset += direction * distance;
+
+        if surface.is_walkable {
+            state.ground = Some(Ground::new(hit.entity, surface.normal));
+        }
 
         let impact = MovementHitData {
             origin,
             direction,
             max_distance,
+            surface,
             distance: hit.distance,
             entity: hit.entity,
             point: hit.point,
-            surface,
+            normal: hit.normal,
         };
 
         match on_hit(state, impact) {
             CollisionResponse::Slide => {}
             CollisionResponse::Skip => continue,
             CollisionResponse::Stop => break,
-        }
-
-        if surface.is_walkable {
-            state.ground = Some(Ground::new(hit.entity, hit.normal));
         }
 
         state.velocity = collision_state.update(
@@ -100,16 +96,11 @@ pub struct MovementHitData {
     pub origin: Vec3,
     pub direction: Dir3,
     pub max_distance: f32,
-    pub entity: Entity,
     pub distance: f32,
-    pub point: Vec3,
     pub surface: Surface,
-}
-
-impl MovementHitData {
-    pub fn normal(&self) -> Dir3 {
-        self.surface.normal
-    }
+    pub entity: Entity,
+    pub point: Vec3,
+    pub normal: Vec3,
 }
 
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
@@ -146,13 +137,19 @@ impl MovementState {
     }
 }
 
-// TODO: Maybe this should be a resource rather than a component? Or both?
+/// Configuration parameters for [`collide_and_slide`] movement.
+///
+// TODO: make this a resource and have the component act as an override
 #[derive(Component, Reflect, Debug, Clone, Copy)]
 #[reflect(Component, Default)]
 #[require(CollideAndSlideFilter)]
 pub struct CollideAndSlideConfig {
+    /// Maximum number of collision resolution attempts per update. Default: `4`
     pub max_iterations: u8,
+    /// Small outward offset from the collision surface to prevent numerical precision issues. Default: `0.05`
     pub skin_width: f32,
+    /// Maximum distance to push back when resolving penetration. Default: `0.0`
+    pub max_penetration_retraction: f32,
 }
 
 impl Default for CollideAndSlideConfig {
@@ -160,6 +157,7 @@ impl Default for CollideAndSlideConfig {
         Self {
             max_iterations: 4,
             skin_width: 0.05,
+            max_penetration_retraction: 0.0,
         }
     }
 }

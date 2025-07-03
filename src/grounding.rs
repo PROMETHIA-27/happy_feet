@@ -5,9 +5,12 @@ use bevy::prelude::*;
 
 use crate::{
     character::CharacterSystems,
-    collide_and_slide::{CollideAndSlideConfig, CollideAndSlideFilter},
+    collide_and_slide::{
+        CollideAndSlideConfig, CollideAndSlideFilter, CollisionResponse, MovementState,
+        collide_and_slide,
+    },
     projection::Surface,
-    sweep::{SweepHitData, sweep},
+    sweep::SweepHitData,
 };
 
 pub(crate) fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
@@ -26,16 +29,17 @@ impl Plugin for GroundingPlugin {
     fn build(&self, app: &mut App) {
         app.configure_sets(
             PhysicsSchedule,
-            GroundingSystems
-                .after(CharacterSystems)
-                .in_set(PhysicsStepSet::Last),
+            (
+                CharacterSystems,
+                GroundingSystems.in_set(PhysicsStepSet::Last),
+            ),
         );
 
         app.add_systems(
             PhysicsSchedule,
-            (detect_ground, trigger_grounding_events)
-                .chain()
-                .in_set(GroundingSystems),
+            (detect_ground, update_grounding)
+                .in_set(GroundingSystems)
+                .chain(),
         );
     }
 }
@@ -54,7 +58,6 @@ pub struct OnGroundEnter(pub Ground);
 pub struct OnGroundLeave(pub Ground);
 
 fn detect_ground(
-    // mut gizmos: Gizmos,
     query_pipeline: Res<SpatialQueryPipeline>,
     mut query: Query<(
         &mut Position,
@@ -79,73 +82,96 @@ fn detect_ground(
         filter,
     ) in &mut query
     {
+        // Only process entities that could be grounded
         if !grounding.is_grounded() && grounding_state.pending.is_none() {
             continue;
         }
 
-        grounding_state.pending = None;
-
-        // Ignore sensors
+        // Filter out sensor entities from collision detection
         let filter_hits = |hit: &SweepHitData| !sensors.contains(hit.entity);
 
-        // Check for ground
-        let Some((surface, hit)) = ground_check(
-            collider,
+        // We use collide-and-slide instead of a single downward shape cast because when walking into
+        // a sloped obstruction, a direct downward sweep might hit the slope obstruction instead of the
+        // ground we're currently standing on. This would cause the character to momentarily become
+        // ungrounded only to re-ground on the next update. The sliding behavior ensures we maintain
+        // proper ground contact in these cases.
+        let mut movement = MovementState::new(
+            -grounding_config.up_direction * grounding_config.max_distance,
             position.0,
+            1.0,
+        );
+
+        collide_and_slide(
+            &mut movement,
+            collider,
             rotation.0,
-            grounding_config.up_direction,
-            grounding_config.max_distance,
-            walkable_angle(grounding_config.max_angle, grounding.is_grounded()),
-            config.skin_width,
-            &query_pipeline,
+            grounding.is_grounded(),
+            &CollideAndSlideConfig {
+                max_iterations: grounding_config.max_iterations,
+                ..*config
+            },
             &filter.0,
-            filter_hits,
-        ) else {
-            continue;
-        };
+            &query_pipeline,
+            |hit| {
+                if !filter_hits(hit) {
+                    return None;
+                }
 
-        // let color = match surface.is_walkable {
-        //     true => LIGHT_GREEN,
-        //     false => CRIMSON,
-        // };
-        //
-        // gizmos.line(hit.point, hit.point + hit.normal * 0.2, color);
-        // gizmos.line(
-        //     hit.point + hit.normal * 0.2,
-        //     hit.point + hit.normal * 0.2 + surface.normal * 0.2,
-        //     color,
-        // );
+                let mut normal = hit.normal;
 
-        let ground = if surface.is_walkable {
-            Ground::new(hit.entity, hit.normal)
-        } else {
-            continue;
-        };
+                // The collision engine returns separation normals rather than surface normals
+                // This can cause issues when determining if a surface would be walkable,
+                // especially on edges. We attempt to find a better surface normal by
+                // casting a few rays near the collision point. This is a workaround and may not work
+                // in all cases, but provides better results than just using the separation normal
+                if let Some(ray_hit) = find_surface_normal(
+                    hit.point,
+                    hit.normal,
+                    grounding_config.up_direction,
+                    0.01,
+                    &query_pipeline,
+                    &filter.0,
+                    filter_hits,
+                ) && ray_hit.normal.dot(*grounding_config.up_direction)
+                    > hit.normal.dot(*grounding_config.up_direction)
+                {
+                    normal = ray_hit.normal;
+                }
 
-        // Snap to the ground
-        if grounding_config.snap_to_surface
-            && sweep(
-                collider,
-                position.0,
-                rotation.0,
-                grounding_config.up_direction,
-                -hit.distance,
-                config.skin_width,
-                &query_pipeline,
-                &filter.0,
-                true,
-                filter_hits,
-            )
-            .is_none()
-        {
-            position.0 -= grounding_config.up_direction * hit.distance.max(-0.01);
+                // Create a Surface with the determined normal and walkable angle
+                Some(Surface::new(
+                    normal,
+                    // Add a small epsilon when already grounded to prevent ungrounding
+                    // when walking on surfaces that are very close to the max angle,
+                    // as surface normals can slightly fluctuate even on flat surfaces
+                    walkable_angle(grounding_config.max_angle, grounding.is_grounded()),
+                    grounding_config.up_direction,
+                ))
+            },
+            |movement, hit| match hit.surface.is_walkable {
+                true => {
+                    // If we've penetrated too far into the ground (beyond max_penetration_retraction),
+                    // push the character back up to maintain proper ground contact
+                    if hit.distance < -config.max_penetration_retraction {
+                        movement.offset -= grounding_config.up_direction * hit.distance;
+                    }
+                    CollisionResponse::Stop
+                }
+                false => CollisionResponse::Slide,
+            },
+            |velocity, surface| velocity.reject_from(*surface.normal),
+        );
+
+        grounding_state.pending = movement.ground;
+
+        // Snap the character to the ground surface when a ground is detected
+        if grounding_config.snap_to_surface && movement.ground.is_some() {
+            position.0 += movement.offset;
         }
-
-        grounding_state.pending = Some(ground);
     }
 }
 
-fn trigger_grounding_events(
+fn update_grounding(
     mut query: Query<(Entity, &mut Grounding, &mut GroundingState)>,
     mut commands: Commands,
 ) {
@@ -170,12 +196,18 @@ fn trigger_grounding_events(
 #[reflect(Component, Default, Debug, Clone)]
 #[require(Grounding)]
 pub struct GroundingConfig {
+    /// Default: `Dir3::Y`
     pub up_direction: Dir3,
-    /// Max walkable angle
+    /// Max walkable angle. Default: `PI / 4.0`
     pub max_angle: f32,
-    /// Max distance from the ground
+    /// Max distance from the ground. Default: `0.2`
     pub max_distance: f32,
+    /// Default: `true`
     pub snap_to_surface: bool,
+    /// The maximum number of slide iterations.
+    /// Must be greater than `0` for grounding to work.
+    /// Default: `2`
+    pub max_iterations: u8,
 }
 
 impl Default for GroundingConfig {
@@ -185,6 +217,7 @@ impl Default for GroundingConfig {
             max_angle: PI / 4.0,
             max_distance: 0.2,
             snap_to_surface: true,
+            max_iterations: 2,
         }
     }
 }
@@ -348,52 +381,8 @@ impl Ground {
     }
 }
 
-/// Sweep in the opposite direction of `up` and return the [`Ground`] if it's walkable.
-pub(crate) fn ground_check(
-    collider: &Collider,
-    translation: Vec3,
-    rotation: Quat,
-    up_direction: Dir3,
-    max_distance: f32,
-    walkable_angle: f32,
-    skin_width: f32,
-    query_pipeline: &SpatialQueryPipeline,
-    query_filter: &SpatialQueryFilter,
-    mut filter_hits: impl FnMut(&SweepHitData) -> bool,
-) -> Option<(Surface, SweepHitData)> {
-    let hit = sweep(
-        collider,
-        translation,
-        rotation,
-        -up_direction,
-        max_distance,
-        skin_width,
-        query_pipeline,
-        query_filter,
-        true,
-        |hit| filter_hits(hit),
-    )?;
-
-    let mut normal = hit.normal;
-
-    if let Some(ray_hit) = ground_surface_rays(
-        hit.point,
-        hit.normal,
-        up_direction,
-        0.01,
-        query_pipeline,
-        query_filter,
-        |sweep| filter_hits(sweep),
-    ) && ray_hit.normal.dot(*up_direction) > hit.normal.dot(*up_direction)
-    {
-        normal = ray_hit.normal;
-    }
-
-    Some((Surface::new(normal, walkable_angle, up_direction), hit))
-}
-
 /// Attempt to retrieve better surface normal using ray casts.
-pub(crate) fn ground_surface_rays(
+pub(crate) fn find_surface_normal(
     point: Vec3,
     normal: Vec3,
     up_direction: Dir3,

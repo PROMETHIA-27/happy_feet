@@ -230,13 +230,7 @@ fn setup(
         Name::new("Player"),
         MovementMode::Walking,
         (
-            // Restitution::new(1.0),
             Character,
-            // CharacterBounce {
-            //     restitution: 0.9,
-            //     behaviour: BounceBehaviour::Obstruction,
-            // },
-            // DebugMotion::default(),
             DebugInput,
             DebugGrounding,
             CharacterMovement::default(),
@@ -270,8 +264,7 @@ fn setup(
             ..Default::default()
         })),
         Transform {
-            translation: Vec3::new(0.0, 2.0, -2.0),
-            // translation: platform_position + platform_offset + Vec3::Y * 10.0,
+            translation: Vec3::new(0.0, 2.0, -4.0),
             rotation: Quat::from_rotation_x(PI),
             ..Default::default()
         },
