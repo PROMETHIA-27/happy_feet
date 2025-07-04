@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use crate::{
     collide_and_slide::{
         CollideAndSlideConfig, CollideAndSlideFilter, CollisionResponse, MovementHitData,
-        MovementState, add_to_filter_on_insert_collider, collide_and_slide,
-        init_filter_mask_on_insert_collision_layers, remove_from_filter_on_replace_collider,
+        MovementState, add_collider_to_filter, collide_and_slide, init_filter_mask,
+        remove_collider_from_filter,
     },
     grounding::{Ground, Grounding, GroundingConfig, GroundingState, is_walkable, walkable_angle},
     moving_platform::InheritedVelocity,
@@ -26,9 +26,10 @@ impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CollideAndSlideConfig>();
 
-        app.add_observer(init_filter_mask_on_insert_collision_layers);
-        app.add_observer(add_to_filter_on_insert_collider);
-        app.add_observer(remove_from_filter_on_replace_collider);
+        app.add_observer(init_filter_mask);
+        app.add_observer(add_collider_to_filter);
+        app.add_observer(remove_collider_from_filter::<OnReplace>);
+        app.add_observer(remove_collider_from_filter::<OnRemove>);
 
         app.configure_sets(
             PhysicsSchedule,
@@ -181,7 +182,7 @@ fn process_movement(
             rotation.0,
             &collide_and_slide_config,
             &query_pipeline,
-            &filter.0,
+            filter,
             |hit| {
                 if !filter_hits(hit) {
                     return None;
@@ -230,7 +231,7 @@ fn process_movement(
                             grounding_config.up_direction,
                             collide_and_slide_config.skin_width,
                             &query_pipeline,
-                            &filter.0,
+                            filter,
                             filter_hits,
                             |hit| {
                                 // Only step on surfaces that are walkable

@@ -154,11 +154,11 @@ impl Default for CollideAndSlideConfig {
 }
 
 /// Cache the [`SpatialQueryFilter`] of the character to avoid re-allocating the excluded entities map every time it's used.
-#[derive(Component, Reflect, Default, Debug, Clone)]
+#[derive(Component, Reflect, Deref, Default, Debug, Clone)]
 #[reflect(Component)]
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 
-pub(crate) fn init_filter_mask_on_insert_collision_layers(
+pub(crate) fn init_filter_mask(
     trigger: Trigger<OnInsert, CollisionLayers>,
     mut rigid_bodies: Query<(&mut CollideAndSlideFilter, &CollisionLayers)>,
 ) {
@@ -169,7 +169,7 @@ pub(crate) fn init_filter_mask_on_insert_collision_layers(
     filter.0.mask = layers.filters;
 }
 
-pub(crate) fn add_to_filter_on_insert_collider(
+pub(crate) fn add_collider_to_filter(
     trigger: Trigger<OnInsert, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,
@@ -183,8 +183,8 @@ pub(crate) fn add_to_filter_on_insert_collider(
     filters.0.excluded_entities.insert(trigger.target());
 }
 
-pub(crate) fn remove_from_filter_on_replace_collider(
-    trigger: Trigger<OnReplace, ColliderOf>,
+pub(crate) fn remove_collider_from_filter<T: Event>(
+    trigger: Trigger<T, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,
 ) {

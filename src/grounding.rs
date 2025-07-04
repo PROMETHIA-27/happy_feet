@@ -117,7 +117,7 @@ fn detect_ground(
                 ..collide_and_slide_config
             },
             &query_pipeline,
-            &filter.0,
+            filter,
             |hit| {
                 if !filter_hits(hit) {
                     return None;
@@ -134,7 +134,7 @@ fn detect_ground(
                     grounding_config.up_direction,
                     0.01,
                     &query_pipeline,
-                    &filter.0,
+                    filter,
                     filter_hits,
                 ) && ray_hit.normal.dot(*grounding_config.up_direction)
                     > hit.normal.dot(*grounding_config.up_direction)
