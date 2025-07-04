@@ -364,6 +364,8 @@ pub(crate) fn friction_factor(velocity: Vec3, friction: f32, delta: f32) -> f32 
     f32::exp(-friction / speed_sq.sqrt() * delta)
 }
 
+/// Calculates acceleration towards a target speed along a given direction.
+/// The resulting acceleration is clamped to avoid overshooting the target speed.
 #[must_use]
 pub fn acceleration(
     velocity: Vec3,

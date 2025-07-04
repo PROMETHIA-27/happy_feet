@@ -69,6 +69,27 @@ pub struct MovementDelta(pub Vec3);
 #[require(CollideAndSlideFilter)]
 pub struct KinematicVelocity(pub Vec3);
 
+impl KinematicVelocity {
+    /// Speed up towards a target speed along a given direction.
+    /// The acceleration is clamped to avoid overshooting the target speed.
+    pub fn accelerate(
+        &mut self,
+        direction: Dir3,
+        max_acceleration: f32,
+        target_speed: f32,
+        delta: f32,
+    ) {
+        let accel = crate::movement::acceleration(
+            self.0,
+            *direction,
+            max_acceleration,
+            target_speed,
+            delta,
+        );
+        self.0 += accel;
+    }
+}
+
 /// Event that is triggered when a character collides with an obstacle during movement.
 #[derive(Event, Reflect)]
 pub struct OnHit {
