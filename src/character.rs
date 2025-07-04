@@ -197,18 +197,18 @@ fn process_movement(
                             vertical,
                             hit: step_hit,
                         }) = perform_step(
-                        stepping_config,
-                        collider,
-                        movement.position(),
-                        rotation.0,
-                        horizontal_direction,
-                        horizontal_motion,
-                        grounding_config.up_direction,
-                        collide_and_slide_config.skin_width,
-                        &query_pipeline,
-                        &filter.0,
-                        filter_hits,
-                        |hit| {
+                            stepping_config,
+                            collider,
+                            movement.position(),
+                            rotation.0,
+                            horizontal_direction,
+                            horizontal_motion,
+                            grounding_config.up_direction,
+                            collide_and_slide_config.skin_width,
+                            &query_pipeline,
+                            &filter.0,
+                            filter_hits,
+                            |hit| {
                                 // Only step on surfaces that are walkable
                                 if !is_walkable(
                                     hit.normal,
@@ -273,10 +273,16 @@ fn process_movement(
                 CollisionResponse::Slide
             },
             |velocity, surface| match grounding.as_ref() {
-                Some((grounding, config, _)) => {
-                    surface.project_velocity(velocity, grounding.normal(), config.up_direction)
+                Some((grounding, grounding_config, _))
+                    if grounding_config.override_velocity_projection =>
+                {
+                    surface.project_velocity(
+                        velocity,
+                        grounding.normal(),
+                        grounding_config.up_direction,
+                    )
                 }
-                None => velocity.reject_from(*surface.normal),
+                _ => velocity.reject_from(*surface.normal),
             },
         );
 

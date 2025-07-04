@@ -213,6 +213,8 @@ pub struct GroundingConfig {
     /// Must be greater than `0` for grounding to work.
     /// Default: `2`
     pub max_iterations: u8,
+    /// Default: `true`
+    pub override_velocity_projection: bool,
 }
 
 impl Default for GroundingConfig {
@@ -223,6 +225,7 @@ impl Default for GroundingConfig {
             max_distance: 0.2,
             snap_to_surface: true,
             max_iterations: 2,
+            override_velocity_projection: true,
         }
     }
 }

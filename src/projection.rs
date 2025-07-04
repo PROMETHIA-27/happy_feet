@@ -4,7 +4,7 @@ use bevy::{math::InvalidDirectionError, prelude::*};
 
 use crate::grounding::is_walkable;
 
-#[derive(Reflect, Debug, Clone, Copy)]
+#[derive(Reflect, Debug, PartialEq, Clone, Copy)]
 #[reflect(Debug, Clone)]
 pub struct Surface {
     pub normal: Dir3,
