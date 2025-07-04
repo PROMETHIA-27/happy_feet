@@ -237,8 +237,9 @@ fn process_movement(
                                 // Only step on surfaces that are walkable
                                 if !is_walkable(
                                     hit.normal,
-                                    // Not sure if this is necessary ???
-                                    grounding_config.max_angle - 0.01,
+                                    stepping_config
+                                        .max_angle
+                                        .unwrap_or(grounding_config.max_angle),
                                     *grounding_config.up_direction,
                                 ) {
                                     return false;

@@ -239,6 +239,8 @@ pub enum SteppingBehaviour {
 pub struct SteppingConfig {
     pub max_vertical: f32,
     pub max_horizontal: f32,
+    /// The maximum angle to be able to step on a surface, uses [`GroundingConfig`](crate::grounding::GroundingConfig) as default.
+    pub max_angle: Option<f32>,
     pub max_substeps: usize,
     pub behaviour: SteppingBehaviour,
 }
@@ -249,6 +251,7 @@ impl Default for SteppingConfig {
             behaviour: Default::default(),
             max_vertical: 0.25,
             max_horizontal: 0.4,
+            max_angle: None,
             max_substeps: 8,
         }
     }
