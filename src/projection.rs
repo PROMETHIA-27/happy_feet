@@ -52,13 +52,14 @@ impl Surface {
         current_ground_normal: Option<Dir3>,
         up_direction: Dir3,
     ) -> Vec3 {
-        let obstruction_normal = *self
+        // TODO: why not just do this in the method instead?
+        let obstruction_normal = self
             .obstruction_normal(current_ground_normal, up_direction)
-            .unwrap();
+            .unwrap_or(self.normal);
 
         project_velocity(
             velocity,
-            obstruction_normal,
+            *obstruction_normal,
             self.is_walkable,
             current_ground_normal,
             up_direction,
