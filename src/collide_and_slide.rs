@@ -59,18 +59,19 @@ pub fn collide_and_slide(
             state.ground = Some(Ground::new(hit.entity, surface.normal));
         }
 
-        let impact = MovementHitData {
-            origin,
-            direction,
-            max_distance,
-            surface,
-            distance: hit.distance,
-            entity: hit.entity,
-            point: hit.point,
-            normal: hit.normal,
-        };
-
-        match on_hit(state, impact) {
+        match on_hit(
+            state,
+            MovementHitData {
+                origin,
+                direction,
+                max_distance,
+                surface,
+                distance: hit.distance,
+                entity: hit.entity,
+                point: hit.point,
+                normal: hit.normal,
+            },
+        ) {
             CollisionResponse::Slide => {}
             CollisionResponse::Skip => continue,
             CollisionResponse::Stop => break,
