@@ -1,11 +1,9 @@
-use std::mem;
-
 use avian3d::prelude::*;
 use bevy::{ecs::relationship::RelationshipSourceCollection, prelude::*};
 
 use crate::{
     grounding::Ground,
-    projection::{CollisionState, Surface},
+    projection::Surface,
     sweep::{SweepHitData, collision_sweep},
 };
 
@@ -13,7 +11,6 @@ pub fn collide_and_slide(
     state: &mut MovementState,
     shape: &Collider,
     rotation: Quat,
-    is_grounded: bool,
     config: &CollideAndSlideConfig,
     query_pipeline: &SpatialQueryPipeline,
     filter: &SpatialQueryFilter,
@@ -22,9 +19,6 @@ pub fn collide_and_slide(
     mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
 ) {
     assert!(config.max_penetration_retraction >= 0.0);
-
-    let mut collision_state = CollisionState::default();
-    let mut previous_velocity = state.velocity;
 
     for _ in 0..config.max_iterations {
         let Ok((direction, max_distance)) =
@@ -82,13 +76,7 @@ pub fn collide_and_slide(
             CollisionResponse::Stop => break,
         }
 
-        state.velocity = collision_state.update(
-            surface,
-            state.velocity,
-            mem::replace(&mut previous_velocity, state.velocity),
-            is_grounded,
-            |vel| project_velocity(vel, surface),
-        );
+        state.velocity = project_velocity(state.velocity, surface);
     }
 }
 

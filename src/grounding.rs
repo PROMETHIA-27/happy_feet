@@ -13,6 +13,8 @@ use crate::{
     sweep::SweepHitData,
 };
 
+/// Add a small epsilon when already grounded to prevent ungrounding when walking on surfaces that
+/// are very close to the max angle, as surface normals can slightly fluctuate even on flat surfaces.
 pub(crate) fn walkable_angle(max_angle: f32, is_grounded: bool) -> f32 {
     match is_grounded {
         true => max_angle + 0.01,
@@ -110,7 +112,6 @@ fn detect_ground(
             &mut movement,
             collider,
             rotation.0,
-            grounding.is_grounded(),
             &CollideAndSlideConfig {
                 max_iterations: grounding_config.max_iterations,
                 ..collide_and_slide_config
@@ -125,10 +126,8 @@ fn detect_ground(
                 let mut normal = hit.normal;
 
                 // The collision engine returns separation normals rather than surface normals
-                // This can cause issues when determining if a surface would be walkable,
-                // especially on edges. We attempt to find a better surface normal by
-                // casting a few rays near the collision point. This is a workaround and may not work
-                // in all cases, but provides better results than just using the separation normal
+                // This can cause issues when determining if a surface would be walkable, especially on edges.
+                // We attempt to find a better surface normal by casting a few rays near the collision point.
                 if let Some(ray_hit) = find_surface_normal(
                     hit.point,
                     hit.normal,
@@ -143,12 +142,8 @@ fn detect_ground(
                     normal = ray_hit.normal;
                 }
 
-                // Create a Surface with the determined normal and walkable angle
                 Some(Surface::new(
                     normal,
-                    // Add a small epsilon when already grounded to prevent ungrounding
-                    // when walking on surfaces that are very close to the max angle,
-                    // as surface normals can slightly fluctuate even on flat surfaces
                     walkable_angle(grounding_config.max_angle, grounding.is_grounded()),
                     grounding_config.up_direction,
                 ))
@@ -388,7 +383,7 @@ impl Ground {
     }
 }
 
-/// Attempt to retrieve better surface normal using ray casts.
+/// Attempt to retrieve a better surface normal using ray casts.
 pub(crate) fn find_surface_normal(
     point: Vec3,
     normal: Vec3,

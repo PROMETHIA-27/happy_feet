@@ -1,3 +1,5 @@
+use std::mem;
+
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
@@ -9,7 +11,7 @@ use crate::{
     },
     grounding::{Ground, Grounding, GroundingConfig, GroundingState, is_walkable, walkable_angle},
     moving_platform::InheritedVelocity,
-    projection::{Surface, align_with_surface},
+    projection::{CollisionState, Surface, align_with_surface},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
     sweep::SweepHitData,
 };
@@ -148,13 +150,14 @@ fn process_movement(
 
         let is_grounded = grounding.as_ref().is_some_and(|(g, ..)| g.is_grounded());
 
+        let mut collision = CollisionState::default();
         let mut movement = MovementState::new(velocity.0, position.0, time.delta_secs());
+        let mut previous_velocity = movement.velocity;
 
         collide_and_slide(
             &mut movement,
             collider,
             rotation.0,
-            is_grounded,
             &collide_and_slide_config,
             &query_pipeline,
             &filter.0,
@@ -276,10 +279,18 @@ fn process_movement(
                 Some((grounding, grounding_config, _))
                     if grounding_config.override_velocity_projection =>
                 {
-                    surface.project_velocity(
+                    collision.update(
+                        surface,
                         velocity,
-                        grounding.normal(),
-                        grounding_config.up_direction,
+                        mem::replace(&mut previous_velocity, velocity),
+                        is_grounded,
+                        |vel| {
+                            surface.project_velocity(
+                                vel,
+                                grounding.normal(),
+                                grounding_config.up_direction,
+                            )
+                        },
                     )
                 }
                 _ => velocity.reject_from(*surface.normal),
