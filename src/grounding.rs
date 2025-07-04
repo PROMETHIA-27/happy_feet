@@ -155,11 +155,10 @@ fn detect_ground(
             },
             |movement, hit| match hit.surface.is_walkable {
                 true => {
-                    // If we've penetrated too far into the ground (beyond max_penetration_retraction),
-                    // push the character back up to maintain proper ground contact
-                    if hit.distance < -collide_and_slide_config.max_penetration_retraction {
-                        movement.offset -= grounding_config.up_direction * hit.distance;
-                    }
+                    // Push the character back up to maintain surface distance
+                    let dist = hit.distance + collide_and_slide_config.max_penetration_retraction;
+                    movement.offset -= grounding_config.up_direction * dist.min(0.0);
+
                     CollisionResponse::Stop
                 }
                 false => CollisionResponse::Slide,
@@ -415,7 +414,6 @@ pub(crate) fn find_surface_normal(
     let right = up_direction.cross(normal).try_normalize()?;
     let forward = up_direction.cross(right).try_normalize()?;
 
-    // TODO: step 0 could probably be removed
     for i in 0..3 {
         let origin = match i {
             0 => point + up_direction * epsilon / 2.0,
