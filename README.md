@@ -3,6 +3,8 @@ Work in progress kinematic character controller for the bevy game engine.
 > [!WARNING]
 > Here be penguins! 🐧
 
+<a href="https://noot.space"><img src="https://noot.space/noot.gif" alt="Noot Noot"/><a/>
+
 ---
 
 🧊 Set up the app
@@ -70,7 +72,7 @@ fn character_input(
 
         if grounding.is_grounded() && key.just_pressed(KeyCode::Space) {
             velocity.y = 6.0;
-            grounding.detach(); // Detach from the ground to avoid snapping back to it during character update
+            grounding.detach(); // Detach from the ground to avoid snapping back to it during movement update
         }
     }
 }
