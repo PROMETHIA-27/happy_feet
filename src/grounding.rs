@@ -148,10 +148,11 @@ fn detect_ground(
                     grounding_config.up_direction,
                 ))
             },
-            |movement, hit| match hit.surface.is_walkable {
+            |movement, slide| match slide.surface.is_walkable {
                 true => {
                     // Push the character back up to maintain surface distance
-                    let dist = hit.distance + collide_and_slide_config.max_penetration_retraction;
+                    let dist =
+                        slide.hit.distance + collide_and_slide_config.max_penetration_retraction;
                     movement.offset -= grounding_config.up_direction * dist.min(0.0);
 
                     CollisionResponse::Stop

@@ -4,7 +4,7 @@ use bevy::{ecs::relationship::RelationshipSourceCollection, prelude::*};
 use crate::{
     grounding::Ground,
     projection::Surface,
-    sweep::{SweepHitData, collision_sweep},
+    sweep::{SweepHitData, SweepInput, collision_sweep},
 };
 
 pub fn collide_and_slide(
@@ -15,7 +15,7 @@ pub fn collide_and_slide(
     query_pipeline: &SpatialQueryPipeline,
     filter: &SpatialQueryFilter,
     mut get_surface: impl FnMut(&SweepHitData) -> Option<Surface>,
-    mut on_hit: impl FnMut(&mut MovementState, MovementHitData) -> CollisionResponse,
+    mut on_hit: impl FnMut(&mut MovementState, SlideInfo) -> CollisionResponse,
     mut project_velocity: impl FnMut(Vec3, Surface) -> Vec3,
 ) {
     assert!(config.max_penetration_retraction >= 0.0);
@@ -29,22 +29,20 @@ pub fn collide_and_slide(
 
         let origin = state.position();
 
-        let mut surface = None;
-        let Some(hit) = collision_sweep(
-            shape,
+        let input = SweepInput {
             origin,
             rotation,
             direction,
             max_distance,
-            config.skin_width,
-            query_pipeline,
-            filter,
-            true,
-            |hit| {
-                surface = get_surface(hit);
-                surface.is_some()
-            },
-        ) else {
+            skin_width: config.skin_width,
+            ignore_origin_penetration: true,
+        };
+
+        let mut surface = None;
+        let Some(hit) = collision_sweep(shape, input, query_pipeline, filter, |hit| {
+            surface = get_surface(hit);
+            surface.is_some()
+        }) else {
             state.offset += direction * max_distance;
             break;
         };
@@ -61,15 +59,10 @@ pub fn collide_and_slide(
 
         match on_hit(
             state,
-            MovementHitData {
-                origin,
-                direction,
-                max_distance,
+            SlideInfo {
+                input,
+                hit,
                 surface,
-                distance: hit.distance,
-                entity: hit.entity,
-                point: hit.point,
-                normal: hit.normal,
             },
         ) {
             CollisionResponse::Slide => {}
@@ -83,15 +76,10 @@ pub fn collide_and_slide(
 
 #[derive(Reflect, Debug, Clone, Copy)]
 #[reflect(Debug, Clone)]
-pub struct MovementHitData {
-    pub origin: Vec3,
-    pub direction: Dir3,
-    pub max_distance: f32,
-    pub distance: f32,
+pub struct SlideInfo {
+    pub input: SweepInput,
+    pub hit: SweepHitData,
     pub surface: Surface,
-    pub entity: Entity,
-    pub point: Vec3,
-    pub normal: Vec3,
 }
 
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]

@@ -16,7 +16,7 @@ impl Plugin for CharacterTypeRegistrationPlugin {
         )>();
         app.register_type::<(
             collide_and_slide::MovementState,
-            collide_and_slide::MovementHitData,
+            collide_and_slide::SlideInfo,
             collide_and_slide::CollisionResponse,
             collide_and_slide::CollideAndSlideConfig,
             collide_and_slide::CollideAndSlideFilter,

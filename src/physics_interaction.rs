@@ -49,7 +49,7 @@ fn physics_interaction_on_hit(
         return;
     }
 
-    let impulse = trigger.velocity.project_onto(*trigger.hit.surface.normal);
+    let impulse = trigger.velocity.project_onto(*trigger.surface.normal);
 
     let Ok((direction, acceleration)) = Dir3::new_and_length(impulse) else {
         return;
@@ -76,7 +76,7 @@ fn physics_interaction_on_hit(
 
     commands.entity(trigger.hit.entity).remove::<Sleeping>();
 
-    character_velocity.0 += trigger.hit.direction * trigger.hit.distance;
+    character_velocity.0 += trigger.input.direction * trigger.hit.distance;
 }
 
 fn apply_acceleration_on_point(

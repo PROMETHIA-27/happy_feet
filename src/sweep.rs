@@ -3,6 +3,17 @@ use bevy::prelude::*;
 
 #[derive(Reflect, Debug, Clone, Copy)]
 #[reflect(Debug, Clone)]
+pub struct SweepInput {
+    pub origin: Vec3,
+    pub rotation: Quat,
+    pub direction: Dir3,
+    pub max_distance: f32,
+    pub skin_width: f32,
+    pub ignore_origin_penetration: bool,
+}
+
+#[derive(Reflect, Debug, Clone, Copy)]
+#[reflect(Debug, Clone)]
 pub struct SweepHitData {
     pub distance: f32,
     pub point: Vec3,
@@ -10,19 +21,20 @@ pub struct SweepHitData {
     pub entity: Entity,
 }
 
-/// Returns the safe hit distance and the hit data from the spatial query for the first hit
-/// where `f` returns `true`.
+/// Returns the safe hit distance and the hit data from the spatial query for the first hit where `f` returns `true`.
 #[must_use]
 pub fn collision_sweep(
     shape: &Collider,
-    origin: Vec3,
-    rotation: Quat,
-    direction: Dir3,
-    max_distance: f32,
-    skin_width: f32,
+    SweepInput {
+        origin,
+        rotation,
+        direction,
+        max_distance,
+        skin_width,
+        ignore_origin_penetration,
+    }: SweepInput,
     query_pipeline: &SpatialQueryPipeline,
     query_filter: &SpatialQueryFilter,
-    ignore_origin_penetration: bool,
     mut filter_hits: impl FnMut(&SweepHitData) -> bool,
 ) -> Option<SweepHitData> {
     let mut hit = None;
@@ -40,7 +52,6 @@ pub fn collision_sweep(
         query_filter,
         |h| {
             // How far is safe to translate by
-            // let distance = (h.distance - skin_width).max(0.0);
             let distance = h.distance - skin_width;
 
             let h = SweepHitData {

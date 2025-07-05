@@ -3,7 +3,7 @@ use bevy::prelude::*;
 
 use crate::{
     grounding::find_surface_normal,
-    sweep::{SweepHitData, collision_sweep},
+    sweep::{SweepHitData, SweepInput, collision_sweep},
 };
 
 const STEP_EPSILON: f32 = 1e-4;
@@ -79,14 +79,16 @@ fn step_up(
 
     if let Some(hit) = collision_sweep(
         shape,
-        origin,
-        rotation,
-        up,
-        max_step_up,
-        skin_width,
+        SweepInput {
+            origin,
+            rotation,
+            direction: up,
+            max_distance: max_step_up,
+            skin_width,
+            ignore_origin_penetration: false,
+        },
         spatial_query,
         query_filter,
-        false,
         filter_hits,
     ) {
         // Hit roof during sweep
@@ -130,14 +132,16 @@ fn step_forward(
         let mut hit_wall = false;
         if let Some(hit) = collision_sweep(
             shape,
-            step_up_position,
-            rotation,
-            horizontal_direction,
-            step_forward,
-            skin_width,
+            SweepInput {
+                origin: step_up_position,
+                rotation,
+                direction: horizontal_direction,
+                max_distance: step_forward,
+                skin_width,
+                ignore_origin_penetration: false,
+            },
             query_pipeline,
             query_filter,
-            false,
             |hit| filter_hits(hit),
         ) {
             // Already touching wall
@@ -155,14 +159,16 @@ fn step_forward(
         let mut valid_step = None;
         if let Some(mut hit) = collision_sweep(
             shape,
-            step_forward_position,
-            rotation,
-            -up_direction,
-            step_up + skin_width,
-            skin_width,
+            SweepInput {
+                origin: step_forward_position,
+                rotation,
+                direction: -up_direction,
+                max_distance: step_up + skin_width,
+                skin_width,
+                ignore_origin_penetration: false,
+            },
             query_pipeline,
             query_filter,
-            false,
             |hit| filter_hits(hit),
         ) && hit.distance > 0.0
             && step_up - hit.distance > skin_width

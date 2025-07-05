@@ -169,14 +169,14 @@ pub(crate) fn bounce_on_character_hit(
 
     match bounce.behaviour {
         BounceBehaviour::Never => return,
-        BounceBehaviour::Ground if !trigger.hit.surface.is_walkable => return,
-        BounceBehaviour::Obstruction if trigger.hit.surface.is_walkable => return,
+        BounceBehaviour::Ground if !trigger.surface.is_walkable => return,
+        BounceBehaviour::Obstruction if trigger.surface.is_walkable => return,
         _ => {}
     }
 
-    let bounce_impulse = -trigger.velocity.dot(*trigger.hit.surface.normal) * bounce.restitution;
+    let bounce_impulse = -trigger.velocity.dot(*trigger.surface.normal) * bounce.restitution;
 
-    velocity.0 += *trigger.hit.surface.normal * bounce_impulse;
+    velocity.0 += *trigger.surface.normal * bounce_impulse;
 
     if bounce_impulse > 0.1
         && let Some(mut grounding) = grounding

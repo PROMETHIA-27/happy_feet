@@ -5,15 +5,14 @@ use bevy::prelude::*;
 
 use crate::{
     collide_and_slide::{
-        CollideAndSlideConfig, CollideAndSlideFilter, CollisionResponse, MovementHitData,
-        MovementState, add_collider_to_filter, collide_and_slide, init_filter_mask,
-        remove_collider_from_filter,
+        CollideAndSlideConfig, CollideAndSlideFilter, CollisionResponse, MovementState, SlideInfo,
+        add_collider_to_filter, collide_and_slide, init_filter_mask, remove_collider_from_filter,
     },
     grounding::{Ground, Grounding, GroundingConfig, GroundingState, is_walkable, walkable_angle},
     moving_platform::InheritedVelocity,
     projection::{CollisionState, Surface, align_with_surface},
     stepping::{StepOutput, SteppingBehaviour, SteppingConfig, perform_step},
-    sweep::SweepHitData,
+    sweep::{SweepHitData, SweepInput},
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -99,8 +98,9 @@ pub struct OnSlide {
     pub velocity: Vec3,
     /// The slide duration
     pub duration: f32,
-    /// Detailed information about the collision, including the hit entity, position, and normal
-    pub hit: MovementHitData,
+    pub input: SweepInput,
+    pub hit: SweepHitData,
+    pub surface: Surface,
 }
 
 /// Triggered when a character stepped over an obstacle.
@@ -205,9 +205,14 @@ fn process_movement(
                     },
                 })
             },
-            |movement, hit| {
+            |movement,
+             SlideInfo {
+                 input,
+                 hit,
+                 surface,
+             }| {
                 // Stepping logic
-                if !hit.surface.is_walkable
+                if !surface.is_walkable
                     && let Some((stepping_config, (grounding, grounding_config, _))) =
                         stepping.zip(grounding.as_ref())
                     && match stepping_config.behaviour {
@@ -295,7 +300,9 @@ fn process_movement(
                 slide_events.push(OnSlide {
                     velocity: movement.velocity,
                     duration: movement.remaining_time,
+                    input,
                     hit,
+                    surface,
                 });
 
                 // Write collision events
