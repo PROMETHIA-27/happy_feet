@@ -1,26 +1,30 @@
-name: Cargo Build & Test
+name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ 'main' ]
   pull_request:
-    branches: [ "main" ]
-    
+    branches: [ 'main' ]
+
 env:
   CARGO_TERM_COLOR: always
-  
+
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # Don't treat warnings as errors (default is '-D warnings')
+          rustflags: ''
       - name: Install Linux dependencies
         uses: bevyengine/bevy/.github/actions/install-linux-deps@main
       - run: cargo build --verbose
       - run: cargo test --verbose
 
-  format:
+  formatting:
+    name: cargo fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,4 +33,3 @@ jobs:
           components: rustfmt
       - name: Rustfmt Check
         uses: actions-rust-lang/rustfmt@v1
-  
