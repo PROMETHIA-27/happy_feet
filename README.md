@@ -72,7 +72,7 @@ fn character_input(
 
         if grounding.is_grounded() && key.just_pressed(KeyCode::Space) {
             velocity.y = 6.0;
-            grounding.detach(); // Detach from the ground to avoid snapping back to it during character update
+            grounding.detach(); // Detach from the ground to avoid snapping back to it during movement update
         }
     }
 }
