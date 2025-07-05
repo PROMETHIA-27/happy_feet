@@ -12,12 +12,21 @@ env:
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        toolchain:
-          - stable
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Linux dependencies
+        uses: bevyengine/bevy/.github/actions/install-linux-deps@main
       - run: cargo build --verbose
       - run: cargo test --verbose
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - name: Rustfmt Check
+        uses: actions-rust-lang/rustfmt@v1
+  
