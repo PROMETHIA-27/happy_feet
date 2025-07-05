@@ -92,10 +92,13 @@ impl KinematicVelocity {
 }
 
 /// Event that is triggered when a character collides with an obstacle during movement.
+
 #[derive(Event, Reflect)]
-pub struct OnHit {
+pub struct OnSlide {
     /// The velocity of the entity at the moment of impact
     pub velocity: Vec3,
+    /// The slide duration
+    pub duration: f32,
     /// Detailed information about the collision, including the hit entity, position, and normal
     pub hit: MovementHitData,
 }
@@ -175,6 +178,8 @@ fn process_movement(
         let mut collision = CollisionState::default();
         let mut movement = MovementState::new(velocity.0, position.0, time.delta_secs());
         let mut previous_velocity = movement.velocity;
+
+        let mut slide_events = Vec::<OnSlide>::new();
 
         collide_and_slide(
             &mut movement,
@@ -283,10 +288,14 @@ fn process_movement(
                     }
                 }
 
-                // Trigger hit event
-                commands.entity(entity).trigger(OnHit {
-                    hit,
+                // Push slide event
+                if let Some(last) = slide_events.last_mut() {
+                    last.duration -= movement.remaining_time;
+                }
+                slide_events.push(OnSlide {
                     velocity: movement.velocity,
+                    duration: movement.remaining_time,
+                    hit,
                 });
 
                 // Write collision events
@@ -319,6 +328,13 @@ fn process_movement(
                 _ => velocity.reject_from(*surface.normal),
             },
         );
+
+        // Trigger slide events
+        commands.queue(move |world: &mut World| {
+            for event in slide_events {
+                world.entity_mut(entity).trigger(event);
+            }
+        });
 
         commands
             .entity(entity)

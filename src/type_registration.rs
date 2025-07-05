@@ -11,7 +11,7 @@ impl Plugin for CharacterTypeRegistrationPlugin {
         app.register_type::<(
             character::Character,
             character::KinematicVelocity,
-            character::OnHit,
+            character::OnSlide,
             character::OnStep,
         )>();
         app.register_type::<(

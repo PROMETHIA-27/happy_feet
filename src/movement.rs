@@ -4,7 +4,7 @@ use avian3d::prelude::*;
 use bevy::{input::InputSystem, prelude::*};
 
 use crate::{
-    character::{KinematicVelocity, OnHit},
+    character::{KinematicVelocity, OnSlide},
     grounding::{Grounding, GroundingConfig},
     projection::align_with_surface,
 };
@@ -156,7 +156,7 @@ pub(crate) fn character_acceleration(
 }
 
 pub(crate) fn bounce_on_character_hit(
-    trigger: Trigger<OnHit>,
+    trigger: Trigger<OnSlide>,
     mut query: Query<(
         &mut KinematicVelocity,
         &CharacterBounce,

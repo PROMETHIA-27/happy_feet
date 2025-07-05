@@ -19,7 +19,7 @@ pub mod sweep;
 pub mod prelude {
     pub use crate::{
         CharacterPlugins,
-        character::{Character, KinematicVelocity, OnHit, OnStep},
+        character::{Character, KinematicVelocity, OnSlide, OnStep},
         collide_and_slide::CollideAndSlideConfig,
         grounding::{Ground, Grounding, GroundingConfig, OnGroundEnter, OnGroundLeave},
         movement::{
