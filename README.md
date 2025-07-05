@@ -3,7 +3,7 @@ Work in progress kinematic character controller for the bevy game engine.
 > [!WARNING]
 > Here be penguins! 🐧
 
-<img src="https://noot.space/noot.gif" alt="Noot Noot"/>
+<a href="https://noot.space"><img src="https://noot.space/noot.gif" alt="Noot Noot"/><a/>
 
 ---
 
