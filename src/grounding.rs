@@ -197,7 +197,8 @@ fn update_grounding(
 }
 
 /// Configuration parameters for character grounding behavior.
-#[derive(Component, Reflect, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(Grounding)]
 pub struct GroundingConfig {
@@ -228,7 +229,8 @@ impl Default for GroundingConfig {
 }
 
 /// Stores the previous ground state of a character.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 pub struct GroundingState {
     pub previous: Option<Ground>,
@@ -237,6 +239,7 @@ pub struct GroundingState {
 
 /// Represents the current ground state of a character.
 #[derive(Component, Reflect, Default, Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, PartialEq, Clone)]
 #[require(GroundingState)]
 pub struct Grounding {
@@ -350,6 +353,7 @@ impl From<Ground> for Grounding {
 
 /// Represents a surface that a character can stand on.
 #[derive(Reflect, Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Debug, PartialEq, Clone)]
 pub struct Ground {
     /// The surface normal vector, pointing outward from the surface.

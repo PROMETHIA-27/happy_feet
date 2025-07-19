@@ -234,7 +234,8 @@ pub enum SteppingBehaviour {
 }
 
 /// Configure stepping for a character.
-#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
+#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, PartialEq, Clone)]
 pub struct SteppingConfig {
     pub max_vertical: f32,

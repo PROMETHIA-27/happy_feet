@@ -43,7 +43,8 @@ impl Plugin for CharacterPlugin {
 }
 
 /// A component for setting up character movement with grounding and stepping behavior.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(
     RigidBody = RigidBody::Kinematic,
@@ -62,7 +63,8 @@ pub struct Character;
 pub struct MovementDelta(pub Vec3);
 
 /// The velocity of a kinematic body that is moved using [`collide-and-slide`](collide_and_slide).
-#[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Default, Clone)]
 #[require(CollideAndSlideFilter)]
 pub struct KinematicVelocity(pub Vec3);
@@ -197,18 +199,18 @@ fn process_movement(
                             vertical,
                             hit: step_hit,
                         }) = perform_step(
-                        stepping_config,
-                        collider,
-                        movement.position(),
-                        rotation.0,
-                        horizontal_direction,
-                        horizontal_motion,
-                        grounding_config.up_direction,
-                        collide_and_slide_config.skin_width,
-                        &query_pipeline,
-                        &filter.0,
-                        filter_hits,
-                        |hit| {
+                            stepping_config,
+                            collider,
+                            movement.position(),
+                            rotation.0,
+                            horizontal_direction,
+                            horizontal_motion,
+                            grounding_config.up_direction,
+                            collide_and_slide_config.skin_width,
+                            &query_pipeline,
+                            &filter.0,
+                            filter_hits,
+                            |hit| {
                                 // Only step on surfaces that are walkable
                                 if !is_walkable(
                                     hit.normal,
