@@ -570,8 +570,6 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-
-
 fn on_ground_enter(_: Trigger<OnGroundEnter>) {
     info!("ENTERED GROUND");
 }

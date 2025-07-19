@@ -1,7 +1,7 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use crate::character::{OnHit, KinematicVelocity};
+use crate::character::{KinematicVelocity, OnHit};
 
 pub struct PhysicsInteractionPlugin;
 
