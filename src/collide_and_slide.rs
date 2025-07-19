@@ -140,7 +140,8 @@ impl MovementState {
 /// Configuration parameters for [`collide_and_slide`] movement.
 ///
 /// Can be configured globally via the resource or per-entity using a component.
-#[derive(Resource, Component, Reflect, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Resource, Component, Reflect, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default)]
 #[require(CollideAndSlideFilter)]
 pub struct CollideAndSlideConfig {

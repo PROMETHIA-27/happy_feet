@@ -225,6 +225,7 @@ fn step_forward(
 
 /// Determines when the character should attempt to step up.
 #[derive(Reflect, Default, Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Default, Debug, PartialEq, Clone)]
 pub enum SteppingBehaviour {
     Never,
@@ -234,7 +235,7 @@ pub enum SteppingBehaviour {
 }
 
 /// Configure stepping for a character.
-#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy, PartialEq)]
+#[derive(Component, Reflect, Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, PartialEq, Clone)]
 pub struct SteppingConfig {

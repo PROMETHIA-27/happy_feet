@@ -264,7 +264,8 @@ impl CharacterDrag {
     pub const ZERO: Self = Self(0.0);
 }
 
-#[derive(Reflect, Default, Debug, Clone)]
+#[derive(Reflect, Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Debug, Default, Clone)]
 pub enum BounceBehaviour {
     Always,

@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = []
-serde = ["dep:serde", "dep:avian3d/serialize"]
+serde = ["dep:serde", "avian3d/serialize"]
 
 [dependencies]
 avian3d = "0.3.0"
