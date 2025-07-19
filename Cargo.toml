@@ -3,9 +3,14 @@ name = "happy_feet"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+serde = ["dep:serde", "avian3d/serialize"]
+
 [dependencies]
 avian3d = "0.3.0"
 bevy = "0.16.0"
+serde = { version = "1.0.219", optional = true }
 
 [dev-dependencies]
 bevy_enhanced_input = "0.12.0"

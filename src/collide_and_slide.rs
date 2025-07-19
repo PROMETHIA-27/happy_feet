@@ -140,7 +140,8 @@ impl MovementState {
 /// Configuration parameters for [`collide_and_slide`] movement.
 ///
 /// Can be configured globally via the resource or per-entity using a component.
-#[derive(Resource, Component, Reflect, Debug, Clone, Copy)]
+#[derive(Resource, Component, Reflect, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default)]
 #[require(CollideAndSlideFilter)]
 pub struct CollideAndSlideConfig {
@@ -163,7 +164,8 @@ impl Default for CollideAndSlideConfig {
 }
 
 /// Cache the [`SpatialQueryFilter`] of the character to avoid re-allocating the excluded entities map every time it's used.
-#[derive(Component, Reflect, Default, Debug, Clone)]
+#[derive(Component, Reflect, Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component)]
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 

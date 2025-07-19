@@ -186,7 +186,8 @@ pub(crate) fn bounce_on_character_hit(
 }
 
 /// Used for modifying [`KinematicVelocity`] based on [`MoveInput`].
-#[derive(Component, Reflect, Debug, Clone)]
+#[derive(Component, Reflect, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Clone)]
 #[require(MoveInput, KinematicVelocity)]
 pub struct CharacterMovement {
@@ -205,7 +206,8 @@ impl Default for CharacterMovement {
 
 /// The gravity force affecting a character while it's not grounded.
 /// If no gravity is defined, then the [`Gravity`] resource will be used.
-#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct CharacterGravity(pub Option<Vec3>);
@@ -222,13 +224,15 @@ impl CharacterGravity {
 }
 
 /// The friction scale when a character walks on an entity.
-#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone)]
+#[derive(Component, Reflect, Deref, DerefMut, Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 pub struct FrictionScale(pub f32);
 
 /// The friction applied to [`KinematicVelocity`] when a character is grounded.
 /// Multiplied by the [`FrictionScale`] of the ground entity.
-#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct GroundFriction(pub f32);
@@ -244,7 +248,8 @@ impl GroundFriction {
 }
 
 /// The drag force applied to the [`KinematicVelocity`] of a character.
-#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Clone)]
 #[require(KinematicVelocity)]
 pub struct CharacterDrag(pub f32);
@@ -259,7 +264,8 @@ impl CharacterDrag {
     pub const ZERO: Self = Self(0.0);
 }
 
-#[derive(Reflect, Default, Debug, Clone)]
+#[derive(Reflect, Default, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Debug, Default, Clone)]
 pub enum BounceBehaviour {
     Always,
@@ -269,7 +275,8 @@ pub enum BounceBehaviour {
     Never,
 }
 
-#[derive(Component, Reflect, Debug, Clone)]
+#[derive(Component, Reflect, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Clone)]
 pub struct CharacterBounce {
     pub restitution: f32,
@@ -287,7 +294,8 @@ impl Default for CharacterBounce {
 
 /// The desired movement direction of a character.
 /// The length of the value will be used to scale the acceleration and target speed when [`CharacterMovement`] is used.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component)]
 pub struct MoveInput {
     pub value: Vec3,
@@ -387,7 +395,8 @@ pub fn acceleration(
 }
 
 /// Factors controlling braking behavior in different directions.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Clone)]
 pub struct BrakeFactor {
     /// Slow down backward motion when moving against the input direction.
