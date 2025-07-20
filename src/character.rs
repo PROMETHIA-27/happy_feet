@@ -45,7 +45,8 @@ impl Plugin for CharacterPlugin {
 }
 
 /// A component for setting up character movement with grounding and stepping behavior.
-#[derive(Component, Reflect, Default, Debug, Clone, Copy)]
+#[derive(Component, Reflect, Default, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Default, Debug, Clone)]
 #[require(
     RigidBody = RigidBody::Kinematic,
@@ -64,7 +65,8 @@ pub struct Character;
 pub struct MovementDelta(pub Vec3);
 
 /// The velocity of a kinematic body that is moved using [`collide-and-slide`](collide_and_slide).
-#[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy)]
+#[derive(Component, Reflect, Deref, DerefMut, Debug, Default, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component, Debug, Default, Clone)]
 #[require(CollideAndSlideFilter)]
 pub struct KinematicVelocity(pub Vec3);
@@ -91,7 +93,6 @@ impl KinematicVelocity {
 }
 
 /// Event that is triggered when a character collides with an obstacle during movement.
-
 #[derive(Event, Reflect)]
 pub struct OnSlide {
     /// The velocity of the entity at the moment of impact

@@ -47,7 +47,8 @@ impl Plugin for MovingPlatformPlugin {
 }
 
 /// A kinematic rigid body that is moved and rotated using `Transform`.
-#[derive(Component, Reflect, Debug, Clone)]
+#[derive(Component, Reflect, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component)]
 #[require(RigidBody = RigidBody::Kinematic)]
 pub struct PhysicsMover;
@@ -150,7 +151,8 @@ pub(crate) fn apply_inherited_velocity_on_ground_leave(
 }
 
 /// The velocity of the ground a character is standing on.
-#[derive(Component, Reflect, Default, Debug)]
+#[derive(Component, Reflect, Default, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[reflect(Component)]
 pub struct InheritedVelocity(pub Vec3);
 
