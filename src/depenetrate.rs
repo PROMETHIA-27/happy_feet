@@ -28,7 +28,6 @@ impl Plugin for DepenetratePlugin {
 }
 
 pub(crate) fn depenetrate(
-    mut commands: Commands,
     mut overlaps: Local<Vec<(Dir3, f32)>>,
     collisions: Collisions,
     mut query: Query<(
