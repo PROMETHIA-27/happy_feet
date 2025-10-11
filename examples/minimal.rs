@@ -5,7 +5,7 @@ use avian3d::prelude::*;
 use bevy::{
     color::palettes::css::*,
     image::{ImageAddressMode, ImageSamplerDescriptor},
-    input::InputSystem,
+    input::InputSystems,
     math::Affine2,
     prelude::*,
 };
@@ -41,7 +41,7 @@ fn main() -> AppExit {
             PhysicsDebugPlugin::default(),
         ))
         .add_systems(Startup, (setup_character, setup_level))
-        .add_systems(PreUpdate, character_input.after(InputSystem))
+        .add_systems(PreUpdate, character_input.after(InputSystems))
         .add_observer(init_ground_movement)
         .add_observer(init_air_movement)
         .run()
@@ -102,12 +102,14 @@ fn character_input(
     }
 }
 
-fn init_ground_movement(trigger: Trigger<OnGroundEnter>, mut commands: Commands) {
-    commands.entity(trigger.target()).insert(GROUND_MOVEMENT);
+fn init_ground_movement(trigger: On<OnGroundEnter>, mut commands: Commands) {
+    commands
+        .entity(trigger.event().entity)
+        .insert(GROUND_MOVEMENT);
 }
 
-fn init_air_movement(trigger: Trigger<OnGroundLeave>, mut commands: Commands) {
-    commands.entity(trigger.target()).insert(AIR_MOVEMENT);
+fn init_air_movement(trigger: On<OnGroundLeave>, mut commands: Commands) {
+    commands.entity(trigger.event().entity).insert(AIR_MOVEMENT);
 }
 
 fn setup_level(

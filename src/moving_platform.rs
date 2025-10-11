@@ -1,6 +1,6 @@
 use std::mem;
 
-use avian3d::{prelude::*, sync::PreviousGlobalTransform};
+use avian3d::prelude::*;
 use bevy::{
     ecs::{intern::Interned, schedule::ScheduleLabel},
     prelude::*,
@@ -38,7 +38,7 @@ impl Plugin for MovingPlatformPlugin {
                 update_inherited_velocity,
                 move_with_platform,
             )
-                .before(PhysicsSet::StepSimulation)
+                .before(PhysicsSystems::StepSimulation)
                 .chain(),
         );
 
@@ -56,7 +56,7 @@ pub struct PhysicsMover;
 pub(crate) fn update_physics_mover(
     mut query: Query<
         (
-            &PreviousGlobalTransform,
+            &GlobalTransform,
             &mut Transform,
             &mut LinearVelocity,
             &mut AngularVelocity,
@@ -140,10 +140,10 @@ pub(crate) fn move_with_platform(
 }
 
 pub(crate) fn apply_inherited_velocity_on_ground_leave(
-    trigger: Trigger<OnGroundLeave>,
+    trigger: On<OnGroundLeave>,
     mut query: Query<(&mut KinematicVelocity, &mut InheritedVelocity)>,
 ) {
-    let Ok((mut velocity, mut platform_velocity)) = query.get_mut(trigger.target()) else {
+    let Ok((mut velocity, mut platform_velocity)) = query.get_mut(trigger.event().entity) else {
         return;
     };
 

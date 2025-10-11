@@ -27,7 +27,8 @@ impl Plugin for DebugPlugin {
 
         app.add_systems(
             FixedPostUpdate,
-            (draw_input_arrow, draw_debug_grounding).after(PhysicsSet::Sync),
+            // [PhysicsSet::Sync was renamed to PhysicsSystems::Writeback](https://github.com/Jondolf/avian/commit/b44e4d2f07c3bf91f961dd35f4d63a8a299b0136)
+            (draw_input_arrow, draw_debug_grounding).after(PhysicsSystems::Writeback),
         );
     }
 }

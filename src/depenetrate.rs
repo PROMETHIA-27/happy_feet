@@ -17,7 +17,7 @@ impl Plugin for DepenetratePlugin {
         app.configure_sets(
             PhysicsSchedule,
             (
-                DepenetrateSystems.in_set(NarrowPhaseSet::Last),
+                DepenetrateSystems.in_set(NarrowPhaseSystems::Last),
                 CharacterSystems,
             )
                 .chain(),

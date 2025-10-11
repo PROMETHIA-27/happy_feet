@@ -7,9 +7,9 @@ use avian3d::prelude::*;
 use bevy::{
     color::palettes::css::*,
     prelude::*,
-    window::{CursorGrabMode, PrimaryWindow},
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
-use bevy_enhanced_input::prelude::*;
+use bevy_enhanced_input::prelude::{Press, *};
 use bevy_skein::SkeinPlugin;
 use happy_feet::{
     debug::{DebugGrounding, DebugInput},
@@ -44,13 +44,13 @@ fn main() -> AppExit {
         .add_systems(PreUpdate, update_movement_settings)
         .add_systems(
             PreUpdate,
-            (move_input, look_input).after(EnhancedInputSystem),
+            (move_input, look_input).before(EnhancedInputSystems::Prepare),
         )
         .add_systems(Update, (remove_ground_when_flying, capture_mouse))
         .add_systems(
             PostUpdate,
             (
-                update_attachments.after(TransformSystem::TransformPropagate),
+                update_attachments.after(TransformSystems::Propagate),
                 update_camera_offset,
                 sync_attachment_global_transforms,
                 update_camera_step_offset,
@@ -61,16 +61,17 @@ fn main() -> AppExit {
         .run()
 }
 
+#[allow(dead_code)]
 fn dbg_speed(query: Query<&KinematicVelocity>) {
     for velocity in query.iter() {
         dbg!("{:?}", velocity.length());
     }
 }
 
-fn capture_mouse(mut query: Query<&mut Window, Added<PrimaryWindow>>) {
+fn capture_mouse(mut query: Query<&mut CursorOptions, Added<PrimaryWindow>>) {
     for mut window in &mut query {
-        window.cursor_options.grab_mode = CursorGrabMode::Locked;
-        window.cursor_options.visible = false;
+        window.grab_mode = CursorGrabMode::Locked;
+        window.visible = false;
     }
 }
 
@@ -189,8 +190,8 @@ fn setup(
         Collider::from(cube),
         Mesh3d(meshes.add(cube)),
         MeshMaterial3d(materials.add(StandardMaterial::default())),
-        ExternalAngularImpulse::new(Vec3::new(0.0, 10.0, 0.0)).with_persistence(true),
-        ExternalForce::new(Vec3::Z * 20.0),
+        ConstantAngularAcceleration::new(0.0, 10.0, 0.0),
+        ConstantLinearAcceleration::new(0.0, 0.0, 20.0),
         AngularDamping(10.0),
     ));
 
@@ -250,6 +251,7 @@ fn setup(
         ),
         CameraStepOffset(Vec3::ZERO),
         walking_actions(),
+        Walking,
         Mass(10.0),
         CollisionEventsEnabled,
         Collider::from(shape),
@@ -278,9 +280,9 @@ fn setup(
         )),
     ));
 
-    commands.spawn(SceneRoot(
+    commands.spawn((SceneRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("playground.gltf")),
-    ));
+    ),));
 }
 
 #[derive(Component, Reflect, Debug)]
@@ -296,86 +298,93 @@ fn move_animated_platform(
     }
 }
 
-#[derive(InputContext)]
+#[derive(Component, Default)]
 struct Walking;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = Vec3)]
+#[action_output(Vec3)]
 struct Move;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct Jump;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct Sneak;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = Vec2)]
+#[action_output(Vec2)]
 struct Look;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct TogglePerspective;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct ToggleFlyMode;
 
 #[derive(InputAction, Debug)]
-#[input_action(output = bool)]
+#[action_output(bool)]
 struct ToggleNoClip;
 
-fn walking_actions() -> Actions<Walking> {
-    let mut actions = Actions::default();
-
-    actions
-        .bind::<Move>()
-        .to((
-            Cardinal::wasd_keys(),
-            Bidirectional {
-                positive: KeyCode::KeyE.with_modifiers(SwizzleAxis::YZX),
-                negative: KeyCode::KeyQ.with_modifiers(SwizzleAxis::YZX),
-            },
-        ))
-        .with_modifiers((Negate::y(), SwizzleAxis::XZY));
-
-    actions
-        .bind::<Jump>()
-        .to(KeyCode::Space)
-        .with_conditions(Press::default());
-
-    actions.bind::<Sneak>().to(KeyCode::ShiftLeft);
-
-    actions
-        .bind::<Look>()
-        .to(Input::mouse_motion())
-        .with_modifiers((Scale::splat(-0.01), SwizzleAxis::YXZ));
-
-    actions
-        .bind::<ToggleFlyMode>()
-        .to(KeyCode::KeyF)
-        .with_conditions(Press::default());
-
-    actions
-        .bind::<ToggleNoClip>()
-        .to(KeyCode::Tab)
-        .with_conditions(Press::default());
-
-    actions
-        .bind::<TogglePerspective>()
-        .to(KeyCode::KeyC)
-        .with_conditions(Press::default());
-
-    actions
+fn walking_actions() -> impl Bundle {
+    actions!(
+        Walking[
+            (
+                Action::<Move>::new(),
+                Bindings::spawn((
+                    Cardinal::wasd_keys(),
+                    Bidirectional {
+                        positive: Binding::from(KeyCode::KeyE),
+                        negative: Binding::from(KeyCode::KeyQ),
+                    }.with(SwizzleAxis::YZX),
+                )),
+                Negate::y(),
+                SwizzleAxis::XZY,
+            ),
+            (
+                Action::<Jump>::new(),
+                bindings![KeyCode::Space],
+                Press::default(),
+            ),
+            (
+                Action::<Sneak>::new(),
+                bindings![KeyCode::ShiftLeft],
+            ),
+            (
+                Action::<Look>::new(),
+                bindings![
+                    Binding::mouse_motion()
+                ],
+                Scale::splat(-0.01),
+                SwizzleAxis::YXZ,
+            ),
+            (
+                Action::<ToggleFlyMode>::new(),
+                bindings![KeyCode::KeyF],
+                Press::default(),
+            ),
+            (
+                Action::<ToggleNoClip>::new(),
+                bindings![KeyCode::Tab],
+                Press::default(),
+            ),
+            (
+                Action::<TogglePerspective>::new(),
+                bindings![KeyCode::KeyC],
+                Press::default(),
+            )
+        ]
+    )
 }
 
 fn on_toggle_fly_mode(
-    trigger: Trigger<Fired<ToggleFlyMode>>,
+    trigger: On<Fire<ToggleFlyMode>>,
     mut query: Query<(&mut MovementMode, &mut CharacterDrag, &mut CharacterGravity)>,
 ) {
-    let (mut mode, mut drag, mut gravity) = query.get_mut(trigger.target()).unwrap();
+    let (mut mode, mut drag, mut gravity) = query.get_mut(trigger.event().context).unwrap();
     match *mode {
         MovementMode::Walking => {
             *mode = MovementMode::Flying;
@@ -393,23 +402,23 @@ fn on_toggle_fly_mode(
 }
 
 fn on_toggle_no_clip(
-    trigger: Trigger<Fired<ToggleNoClip>>,
+    trigger: On<Fire<ToggleNoClip>>,
     mut commands: Commands,
     query: Query<Has<Sensor>>,
 ) {
-    let is_sensor = query.get(trigger.target()).unwrap();
+    let is_sensor = query.get(trigger.event().context).unwrap();
     match is_sensor {
-        true => commands.entity(trigger.target()).remove::<Sensor>(),
-        false => commands.entity(trigger.target()).insert(Sensor),
+        true => commands.entity(trigger.event().context).remove::<Sensor>(),
+        false => commands.entity(trigger.event().context).insert(Sensor),
     };
 }
 
 fn on_toggle_perspective(
-    trigger: Trigger<Fired<TogglePerspective>>,
+    trigger: On<Fire<TogglePerspective>>,
     targets: Query<&Attachments>,
     mut cameras: Query<&mut PlayerCamera>,
 ) -> Result {
-    let attachments = targets.get(trigger.target())?;
+    let attachments = targets.get(trigger.event().context)?;
 
     let mut iter = cameras.iter_many_mut(attachments.iter());
 
@@ -424,7 +433,7 @@ fn on_toggle_perspective(
 }
 
 fn on_jump(
-    trigger: Trigger<Fired<Jump>>,
+    trigger: On<Fire<Jump>>,
     mut query: Query<(
         &mut KinematicVelocity,
         &mut Grounding,
@@ -432,7 +441,8 @@ fn on_jump(
         &MovementMode,
     )>,
 ) -> Result {
-    let (mut velocity, mut grounding, grounding_config, mode) = query.get_mut(trigger.target())?;
+    let (mut velocity, mut grounding, grounding_config, mode) =
+        query.get_mut(trigger.event().context)?;
     if let MovementMode::Walking = mode {
         jump(
             7.0,
@@ -473,38 +483,37 @@ fn remove_ground_when_flying(mut query: Query<(&mut Grounding, &MovementMode)>) 
 }
 
 fn move_input(
-    mut query: Query<(&mut MoveInput, &mut MovementMode, &Actions<Walking>)>,
+    mut query: Query<(&mut MoveInput, &mut MovementMode)>,
+    movement: Single<&Action<Move>>,
+    sneak: Single<&Action<Sneak>>,
     camera: Single<&GlobalTransform, With<PlayerCamera>>,
 ) {
     let mut camera_transform = camera.compute_transform();
 
-    for (mut input, mode, actions) in &mut query {
+    for (mut input, mode) in &mut query {
         if let MovementMode::Walking = *mode {
             camera_transform.align(Dir3::Y, Dir3::Y, Dir3::NEG_Z, camera_transform.forward());
         }
 
-        let axis = actions.get::<Move>().unwrap().value().as_axis3d();
+        // info!("Movement: {}", movement.normalize_or_zero());
+        input.set(camera_transform.rotation * movement.normalize_or_zero());
 
-        input.set(camera_transform.rotation * axis.normalize_or_zero());
-
-        if actions.get::<Sneak>().unwrap().value().as_bool() {
+        if ***sneak {
             input.value *= 0.2;
         }
     }
 }
 
 fn look_input(
-    characters: Query<&Actions<Walking>>,
-    mut cameras: Query<(&mut Transform, &Projection, &AttachedTo)>,
+    look: Single<&Action<Look>>,
+    mut cameras: Query<(&mut Transform, &Projection)>,
 ) -> Result {
-    for (mut camera_transform, projection, attached_to) in &mut cameras {
+    for (mut camera_transform, projection) in &mut cameras {
         let &Projection::Perspective(PerspectiveProjection { fov, .. }) = projection else {
             Err("expected perspective projection")?
         };
 
-        let actions = characters.get(attached_to.0)?;
-
-        let axis = actions.get::<Look>()?.value().as_axis2d() / fov;
+        let axis = ***look / fov;
 
         let (mut yaw, mut pitch, roll) = camera_transform.rotation.to_euler(EulerRot::YXZ);
 
@@ -570,14 +579,14 @@ fn sync_attachment_global_transforms(
 #[reflect(Component)]
 struct CameraStepOffset(Vec3);
 
-fn on_ground_enter(_: Trigger<OnGroundEnter>) {
+fn on_ground_enter(_: On<OnGroundEnter>) {
     info!("ENTERED GROUND");
 }
 
-fn on_ground_leave(_: Trigger<OnGroundLeave>) {
+fn on_ground_leave(_: On<OnGroundLeave>) {
     info!("LEFT GROUND");
 }
 
-fn on_step(_: Trigger<OnStep>) {
+fn on_step(_: On<OnStep>) {
     info!("STEPPED");
 }
