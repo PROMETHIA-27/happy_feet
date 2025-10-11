@@ -33,7 +33,7 @@ impl Plugin for GroundingPlugin {
             PhysicsSchedule,
             (
                 CharacterSystems,
-                GroundingSystems.in_set(PhysicsStepSet::Last),
+                GroundingSystems.in_set(PhysicsStepSystems::Last),
             ),
         );
 
@@ -50,14 +50,22 @@ impl Plugin for GroundingPlugin {
 ///
 /// This is only triggered for the last ground the character touched during the update and will not be triggered
 /// if the character was already grounded prior to the start of the update.
-#[derive(Event, Reflect, Deref)]
-pub struct OnGroundEnter(pub Ground);
+#[derive(EntityEvent, Reflect, Deref)]
+pub struct OnGroundEnter {
+    pub entity: Entity,
+    #[deref]
+    pub ground: Ground,
+}
 
 /// Triggered when the character becomes ungrounded during a movement update.
 ///
 /// This is only triggered if the character is ungrounded at the end of the update.
-#[derive(Event, Reflect, Deref)]
-pub struct OnGroundLeave(pub Ground);
+#[derive(EntityEvent, Reflect, Deref)]
+pub struct OnGroundLeave {
+    pub entity: Entity,
+    #[deref]
+    pub ground: Ground,
+}
 
 fn detect_ground(
     query_pipeline: Res<SpatialQueryPipeline>,
@@ -178,10 +186,14 @@ fn update_grounding(
     for (entity, mut grounding, mut grounding_state) in &mut query {
         match (grounding_state.previous, grounding_state.pending) {
             (Some(ground), None) => {
-                commands.entity(entity).trigger(OnGroundLeave(ground));
+                commands
+                    .entity(entity)
+                    .trigger(|entity| OnGroundLeave { entity, ground });
             }
             (None, Some(ground)) => {
-                commands.entity(entity).trigger(OnGroundEnter(ground));
+                commands
+                    .entity(entity)
+                    .trigger(|entity| OnGroundEnter { entity, ground });
             }
             _ => {}
         }

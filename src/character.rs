@@ -27,12 +27,12 @@ impl Plugin for CharacterPlugin {
 
         app.add_observer(init_filter_mask);
         app.add_observer(add_collider_to_filter);
-        app.add_observer(remove_collider_from_filter::<OnReplace>);
-        app.add_observer(remove_collider_from_filter::<OnRemove>);
+        app.add_observer(remove_collider_from_filter::<Replace>);
+        app.add_observer(remove_collider_from_filter::<Remove>);
 
         app.configure_sets(
             PhysicsSchedule,
-            CharacterSystems.in_set(NarrowPhaseSet::Last),
+            CharacterSystems.in_set(NarrowPhaseSystems::Last),
         );
 
         app.add_systems(
@@ -93,8 +93,9 @@ impl KinematicVelocity {
 }
 
 /// Event that is triggered when a character collides with an obstacle during movement.
-#[derive(Event, Reflect)]
+#[derive(EntityEvent, Reflect)]
 pub struct OnSlide {
+    pub entity: Entity,
     /// The velocity of the entity at the moment of impact
     pub velocity: Vec3,
     /// The slide duration
@@ -105,8 +106,9 @@ pub struct OnSlide {
 }
 
 /// Triggered when a character stepped over an obstacle.
-#[derive(Event, Reflect)]
+#[derive(EntityEvent, Reflect)]
 pub struct OnStep {
+    pub entity: Entity,
     /// The velocity of the entity before stepping
     pub velocity: Vec3,
     /// The translation of the character before stepping.
@@ -141,10 +143,11 @@ fn process_movement(
         Has<Sensor>,
     )>,
     rigid_bodies: Query<&RigidBody>,
+    colliders_of: Query<&ColliderOf>,
     sensors: Query<Entity, With<Sensor>>,
     time: Res<Time>,
-    mut collision_started_events: EventWriter<CollisionStarted>,
-    mut collision_ended_events: EventWriter<CollisionEnded>,
+    mut collision_started_events: MessageWriter<CollisionStart>,
+    mut collision_ended_events: MessageWriter<CollisionEnd>,
 ) {
     for (
         entity,
@@ -272,7 +275,8 @@ fn process_movement(
                         let duration = horizontal * time.delta_secs();
 
                         // Trigger step event
-                        commands.entity(entity).trigger(OnStep {
+                        commands.entity(entity).trigger(|entity| OnStep {
+                            entity,
                             origin: movement.position(),
                             velocity: movement.velocity,
                             offset,
@@ -299,6 +303,7 @@ fn process_movement(
                     last.duration -= movement.remaining_time;
                 }
                 slide_events.push(OnSlide {
+                    entity: Entity::PLACEHOLDER,
                     velocity: movement.velocity,
                     duration: movement.remaining_time,
                     input,
@@ -308,9 +313,19 @@ fn process_movement(
 
                 // Write collision events
                 if collision_events_enabled {
-                    collision_started_events.write(CollisionStarted(entity, hit.entity));
+                    collision_started_events.write(CollisionStart {
+                        collider1: entity,
+                        collider2: hit.entity,
+                        body1: colliders_of.get(entity).ok().map(|of| of.body),
+                        body2: colliders_of.get(hit.entity).ok().map(|of| of.body),
+                    });
                     // Assume the collision is ended immediately, which it did because we slided (:
-                    collision_ended_events.write(CollisionEnded(entity, hit.entity));
+                    collision_ended_events.write(CollisionEnd {
+                        collider1: entity,
+                        collider2: hit.entity,
+                        body1: colliders_of.get(entity).ok().map(|of| of.body),
+                        body2: colliders_of.get(hit.entity).ok().map(|of| of.body),
+                    });
                 }
 
                 CollisionResponse::Slide
@@ -339,8 +354,11 @@ fn process_movement(
 
         // Trigger slide events
         commands.queue(move |world: &mut World| {
-            for event in slide_events {
-                world.entity_mut(entity).trigger(event);
+            for mut event in slide_events {
+                world.entity_mut(entity).trigger(|entity| {
+                    event.entity = entity;
+                    event
+                });
             }
         });
 

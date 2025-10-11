@@ -1,7 +1,7 @@
 use std::mem;
 
 use avian3d::prelude::*;
-use bevy::{input::InputSystem, prelude::*};
+use bevy::{input::InputSystems, prelude::*};
 
 use crate::{
     character::{KinematicVelocity, OnSlide},
@@ -13,7 +13,7 @@ pub struct MovementPlugin;
 
 impl Plugin for MovementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, clear_movement_input.before(InputSystem));
+        app.add_systems(PreUpdate, clear_movement_input.before(InputSystems));
 
         app.add_systems(
             PhysicsSchedule,
@@ -23,7 +23,7 @@ impl Plugin for MovementPlugin {
                 character_gravity,
                 character_acceleration,
             )
-                .in_set(PhysicsStepSet::First)
+                .in_set(PhysicsStepSystems::First)
                 .chain(),
         );
 
@@ -156,14 +156,14 @@ pub(crate) fn character_acceleration(
 }
 
 pub(crate) fn bounce_on_character_hit(
-    trigger: Trigger<OnSlide>,
+    trigger: On<OnSlide>,
     mut query: Query<(
         &mut KinematicVelocity,
         &CharacterBounce,
         Option<&mut Grounding>,
     )>,
 ) {
-    let Ok((mut velocity, bounce, grounding)) = query.get_mut(trigger.target()) else {
+    let Ok((mut velocity, bounce, grounding)) = query.get_mut(trigger.event().entity) else {
         return;
     };
 

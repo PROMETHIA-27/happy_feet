@@ -149,10 +149,10 @@ impl Default for CollideAndSlideConfig {
 pub struct CollideAndSlideFilter(pub(crate) SpatialQueryFilter);
 
 pub(crate) fn init_filter_mask(
-    trigger: Trigger<OnInsert, CollisionLayers>,
+    trigger: On<Insert, CollisionLayers>,
     mut rigid_bodies: Query<(&mut CollideAndSlideFilter, &CollisionLayers)>,
 ) {
-    let Ok((mut filter, layers)) = rigid_bodies.get_mut(trigger.target()) else {
+    let Ok((mut filter, layers)) = rigid_bodies.get_mut(trigger.event().entity) else {
         return;
     };
 
@@ -160,29 +160,32 @@ pub(crate) fn init_filter_mask(
 }
 
 pub(crate) fn add_collider_to_filter(
-    trigger: Trigger<OnInsert, ColliderOf>,
+    trigger: On<Insert, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,
 ) {
-    let collider_of = colliders.get(trigger.target()).unwrap();
+    let collider_of = colliders.get(trigger.event().entity).unwrap();
 
     let Ok(mut filters) = filters.get_mut(collider_of.body) else {
         return;
     };
 
-    filters.0.excluded_entities.insert(trigger.target());
+    filters.0.excluded_entities.insert(trigger.event().entity);
 }
 
-pub(crate) fn remove_collider_from_filter<T: Event>(
-    trigger: Trigger<T, ColliderOf>,
+pub(crate) fn remove_collider_from_filter<T: EntityEvent>(
+    trigger: On<T, ColliderOf>,
     colliders: Query<&ColliderOf>,
     mut filters: Query<&mut CollideAndSlideFilter>,
 ) {
-    let collider_of = colliders.get(trigger.target()).unwrap();
+    let collider_of = colliders.get(trigger.event().event_target()).unwrap();
 
     let Ok(mut filters) = filters.get_mut(collider_of.body) else {
         return;
     };
 
-    filters.0.excluded_entities.remove(trigger.target());
+    filters
+        .0
+        .excluded_entities
+        .remove(trigger.event().event_target());
 }

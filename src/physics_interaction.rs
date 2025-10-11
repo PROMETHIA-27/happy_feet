@@ -12,7 +12,7 @@ impl Plugin for PhysicsInteractionPlugin {
 }
 
 fn physics_interaction_on_hit(
-    trigger: Trigger<OnSlide>,
+    trigger: On<OnSlide>,
     mut commands: Commands,
     mut bodies: Query<(
         &RigidBody,
@@ -28,7 +28,8 @@ fn physics_interaction_on_hit(
     mut characters: Query<(&mut KinematicVelocity, &ComputedMass)>,
     time: Res<Time>,
 ) {
-    let (mut character_velocity, character_mass) = characters.get_mut(trigger.target()).unwrap();
+    let (mut character_velocity, character_mass) =
+        characters.get_mut(trigger.event().entity).unwrap();
 
     let Ok((
         rb,
@@ -69,7 +70,7 @@ fn physics_interaction_on_hit(
         &mut linear_vel,
         &mut angular_vel,
         mass.inverse(),
-        inertia.inverse(),
+        inertia.inverse().into(),
         transform.transform_point(center_of_mass.0),
         time.delta_secs(),
     );
@@ -126,19 +127,4 @@ fn apply_acceleration_on_point(
 
         *angular_velocity += torque_axis * angular_accel;
     }
-}
-
-fn apply_impulse_on_point(
-    impulse: Vec3,
-    point: Vec3,
-    linear_velocity: &mut Vec3,
-    angular_velocity: &mut Vec3,
-    inverse_mass: f32,
-    inverse_inertia: Mat3,
-    center_of_mass: Vec3,
-) {
-    *linear_velocity += inverse_mass * impulse;
-
-    let torque = (point - center_of_mass).cross(impulse);
-    *angular_velocity += inverse_inertia * torque;
 }
