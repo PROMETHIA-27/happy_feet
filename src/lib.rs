@@ -35,6 +35,7 @@ pub mod type_registration;
 
 pub struct CharacterPlugins {
     pub schedule: Interned<dyn ScheduleLabel>,
+    pub debug: bool,
 }
 
 impl Default for CharacterPlugins {
@@ -47,7 +48,13 @@ impl CharacterPlugins {
     pub fn new(schedule: impl ScheduleLabel) -> Self {
         Self {
             schedule: schedule.intern(),
+            debug: false,
         }
+    }
+
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        self.debug = debug;
+        self
     }
 }
 
@@ -60,14 +67,19 @@ impl PluginGroup for CharacterPlugins {
             type_registration::CharacterTypeRegistrationPlugin,
         };
 
-        PluginGroupBuilder::start::<Self>()
-            .add(DebugPlugin)
+        let builder = PluginGroupBuilder::start::<Self>()
             .add(CharacterTypeRegistrationPlugin)
             .add(CharacterPlugin)
             .add(GroundingPlugin)
             .add(DepenetratePlugin)
             .add(MovingPlatformPlugin::new(self.schedule))
             .add(PhysicsInteractionPlugin)
-            .add(MovementPlugin)
+            .add(MovementPlugin);
+
+        if self.debug {
+            builder.add(DebugPlugin)
+        } else {
+            builder
+        }
     }
 }
