@@ -77,10 +77,13 @@ pub(crate) fn depenetrate(
                         grounding_config.up_direction,
                     );
                     let ground_normal = grounding.normal();
-                    let obstruction_normal = surface
-                        .obstruction_normal(ground_normal, grounding_config.up_direction)
-                        .unwrap();
-                    (surface, obstruction_normal, ground_normal)
+                    if let Ok(obstruction_normal) =
+                        surface.obstruction_normal(ground_normal, grounding_config.up_direction)
+                    {
+                        (surface, obstruction_normal, ground_normal)
+                    } else {
+                        (surface, surface.normal, None)
+                    }
                 }
                 None => {
                     let surface = Surface {
